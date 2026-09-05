@@ -1,0 +1,19 @@
+{
+  "name": "shiire-research",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "中古ブランド品の仕入れリサーチ用サイト（セカスト・ブランディア・トレファク横断検索）",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test/run.js",
+    "test:ui": "node test/ui.mjs"
+  },
+  "dependencies": {
+    "cheerio": "1.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

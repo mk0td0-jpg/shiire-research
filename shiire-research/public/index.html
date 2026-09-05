@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>仕入れリサーチ</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="仕入れリサーチ">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar__row">
+    <h1 class="topbar__title">仕入れリサーチ</h1>
+    <button id="refreshBtn" class="btn btn--ghost" type="button">商品を更新</button>
+  </div>
+  <p class="topbar__meta" id="updatedAt">　</p>
+</header>
+
+<nav class="brands" id="brandBar" aria-label="ブランド選択"></nav>
+
+<nav class="views" id="viewBar">
+  <button class="viewBtn is-active" data-view="all" type="button">一覧</button>
+  <button class="viewBtn" data-view="fav" type="button">☆ お気に入り<span class="viewBtn__n" data-count="fav"></span></button>
+  <button class="viewBtn" data-view="cand" type="button">◎ 仕入れ候補<span class="viewBtn__n" data-count="cand"></span></button>
+  <button class="viewBtn" data-view="hidden" type="button">× 非表示<span class="viewBtn__n" data-count="hidden"></span></button>
+</nav>
+
+<div class="toolbar">
+  <select id="sortSelect" class="control" aria-label="並び替え">
+    <option value="new">新着順</option>
+    <option value="priceAsc">価格が安い順</option>
+    <option value="priceDesc">価格が高い順</option>
+  </select>
+  <button id="newOnlyBtn" class="control control--toggle" type="button">NEWのみ</button>
+  <button id="filterBtn" class="control control--toggle" type="button">絞り込み</button>
+</div>
+
+<section id="filterPanel" class="filters" hidden>
+  <div class="filters__group">
+    <span class="filters__label">販売サイト</span>
+    <div id="siteFilter" class="chips"></div>
+  </div>
+  <div class="filters__group">
+    <span class="filters__label">価格（円・税込）</span>
+    <div class="filters__row">
+      <input id="priceMin" class="input" type="number" inputmode="numeric" placeholder="下限" min="0">
+      <span class="tilde">〜</span>
+      <input id="priceMax" class="input" type="number" inputmode="numeric" placeholder="上限" min="0">
+    </div>
+  </div>
+  <div class="filters__group">
+    <span class="filters__label">サイズ</span>
+    <div id="sizeFilter" class="chips"></div>
+  </div>
+  <div class="filters__group">
+    <span class="filters__label">キーワード</span>
+    <input id="keywordInput" class="input input--full" type="search" placeholder="商品名にふくまれる言葉">
+  </div>
+  <button id="clearFilters" class="btn btn--ghost btn--block" type="button">絞り込みをリセット</button>
+</section>
+
+<section id="settingsPanel" class="settings" hidden>
+  <label class="settings__row">
+    <span>想定送料（円）</span>
+    <input id="shippingInput" class="input" type="number" inputmode="numeric" min="0">
+  </label>
+  <label class="settings__row">
+    <span>販売手数料（％）</span>
+    <input id="feeInput" class="input" type="number" inputmode="decimal" min="0" max="50" step="0.5">
+  </label>
+  <p class="settings__note">予想利益 ＝ 予想販売価格 −　仕入価格 −　手数料 −　送料</p>
+</section>
+
+<div id="notices" class="notices"></div>
+<p id="resultCount" class="resultCount"></p>
+<main id="grid" class="grid" aria-live="polite"></main>
+<p id="emptyMsg" class="empty" hidden></p>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
