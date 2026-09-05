@@ -44,10 +44,15 @@ async function fetchSiteForBrand(site, brand, settings) {
   }
 
   if (!anySuccess) {
-    const reason =
-      lastError && lastError.code === 'ROBOTS_DISALLOW'
-        ? 'robots.txt により取得できません'
-        : '取得できませんでした';
+    let reason = '取得できませんでした';
+    if (lastError) {
+      if (lastError.code === 'ROBOTS_DISALLOW') reason = 'robots.txt により取得できません';
+      else if (lastError.status) reason = '取得できませんでした（' + lastError.status + '）';
+      else if (lastError.name === 'AbortError' || lastError.name === 'TimeoutError')
+        reason = '取得できませんでした（時間切れ）';
+      else if (lastError.message)
+        reason = '取得できませんでした（' + String(lastError.message).slice(0, 40) + '）';
+    }
     return { ok: false, error: reason, items: [] };
   }
   return { ok: true, error: null, items: collected };

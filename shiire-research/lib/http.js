@@ -5,8 +5,24 @@
 //  - ログインが必要なページ・CAPTCHA 等は一切さわらない（公開ページのみ）
 
 const UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
-  '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// 普通のブラウザと同じ組み合わせのヘッダーを送る（矛盾があると弾かれるサイトがあるため）
+const BROWSER_HEADERS = {
+  accept:
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'accept-language': 'ja,en-US;q=0.9,en;q=0.8',
+  'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"macOS"',
+  'sec-fetch-dest': 'document',
+  'sec-fetch-mode': 'navigate',
+  'sec-fetch-site': 'none',
+  'sec-fetch-user': '?1',
+  'upgrade-insecure-requests': '1',
+  'user-agent': UA,
+};
 
 const lastAccess = new Map(); // host -> timestamp
 const robotsCache = new Map(); // host -> { rules, expires }
@@ -105,24 +121,34 @@ export async function fetchHtml(url, { intervalMs = 800, timeoutMs = 12000 } = {
   }
   await politeWait(u.host, intervalMs);
 
+  return attempt(url, u, timeoutMs, 0);
+}
+
+async function attempt(url, u, timeoutMs, tries) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      headers: {
-        'user-agent': UA,
-        accept: 'text/html,application/xhtml+xml',
-        'accept-language': 'ja,en-US;q=0.8,en;q=0.6',
-      },
+      headers: { ...BROWSER_HEADERS, referer: u.origin + '/' },
       redirect: 'follow',
       signal: ctrl.signal,
     });
     if (!res.ok) {
-      const err = new Error(`HTTP ${res.status}`);
+      const err = new Error('HTTP ' + res.status);
       err.code = 'HTTP_' + res.status;
+      err.status = res.status;
       throw err;
     }
     return await res.text();
+  } catch (err) {
+    // 一時的な失敗のときだけ、少し待って1回だけやり直す
+    const retryable = !err.status || err.status === 429 || err.status >= 500;
+    if (tries < 1 && retryable) {
+      clearTimeout(timer);
+      await sleep(1200);
+      return attempt(url, u, timeoutMs, tries + 1);
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
