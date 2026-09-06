@@ -8,6 +8,10 @@ import trefac from './sites/trefac.js';
 
 export const SITES = [twond, brandear, trefac];
 
+// 自動取得を受け付けていないサイトへ何度もアクセスしないための記録
+const BLOCK_MINUTES = 30;
+const blockedUntil = new Map();
+
 export function findBrand(config, brandId) {
   return config.brands.find((b) => b.id === brandId) || null;
 }
@@ -17,6 +21,10 @@ function dedupeKey(siteId, item) {
 }
 
 async function fetchSiteForBrand(site, brand, settings) {
+  const until = blockedUntil.get(site.id) || 0;
+  if (until > Date.now()) {
+    return { ok: false, blocked: true, error: 'このサイトは自動取得を受け付けていません', items: [] };
+  }
   const collected = [];
   const seen = new Set();
   let lastError = null;
@@ -39,6 +47,10 @@ async function fetchSiteForBrand(site, brand, settings) {
       }
     } catch (err) {
       lastError = err;
+      if (err.status === 401 || err.status === 403) {
+        blockedUntil.set(site.id, Date.now() + BLOCK_MINUTES * 60 * 1000);
+        break;
+      }
     }
     if (collected.length >= settings.maxItemsPerSource) break;
   }
@@ -47,6 +59,8 @@ async function fetchSiteForBrand(site, brand, settings) {
     let reason = '取得できませんでした';
     if (lastError) {
       if (lastError.code === 'ROBOTS_DISALLOW') reason = 'robots.txt により取得できません';
+      else if (lastError.status === 401 || lastError.status === 403)
+        reason = 'このサイトは自動取得を受け付けていません';
       else if (lastError.status) reason = '取得できませんでした（' + lastError.status + '）';
       else if (lastError.name === 'AbortError' || lastError.name === 'TimeoutError')
         reason = '取得できませんでした（時間切れ）';
@@ -121,6 +135,7 @@ export async function loadBrand(config, brandId, { refresh = false } = {}) {
       short: site.short,
       color: site.color,
       ok: result.ok,
+      blocked: result.blocked === true || result.error === 'このサイトは自動取得を受け付けていません',
       error: result.error,
       count: filtered.length,
       searchUrl: site.searchPageUrl(brand.keywords[0]),

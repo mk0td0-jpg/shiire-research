@@ -44,7 +44,8 @@ export function mockBrand(brand) {
     sources: SITES.map((s, i) => ({
       ...s,
       ok: i !== 2,
-      error: i === 2 ? '取得できませんでした' : null,
+      blocked: i === 2,
+      error: i === 2 ? 'このサイトは自動取得を受け付けていません' : null,
       count: i === 2 ? 0 : 14,
       searchUrl: `https://example.com/${s.id}/search`,
     })),
