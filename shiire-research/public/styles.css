@@ -190,6 +190,25 @@ button, input, select { font-family: inherit; font-size: 16px; }
 }
 .notice a { color: #8a4526; font-weight: 700; white-space: nowrap; }
 
+.siteLinks__lead { margin: 8px 2px 6px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.siteLinks { display: grid; gap: 8px; }
+.siteLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+}
+.siteLink__dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.siteLink__txt { flex: 1 1 auto; min-width: 0; }
+.siteLink__go { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+
 .resultCount { margin: 10px 12px 4px; font-size: 12px; color: var(--muted); }
 
 /* ---------- grid ---------- */

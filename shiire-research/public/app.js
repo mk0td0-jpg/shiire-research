@@ -312,14 +312,34 @@
     var box = $('#notices');
     box.innerHTML = '';
     if (state.view !== 'all') return;
-    state.sources.forEach(function (s) {
-      if (s.ok) return;
-      var div = document.createElement('div');
-      div.className = 'notice';
-      div.innerHTML = '<span>' + esc(s.name) + '：' + esc(s.error || '取得できませんでした') + '</span>' +
-        '<a href="' + esc(s.searchUrl) + '" target="_blank" rel="noopener">サイトで見る →</a>';
-      box.appendChild(div);
+    var failed = state.sources.filter(function (s) { return !s.ok; });
+    if (!failed.length) return;
+
+    var label = brandLabel(state.brandId) || '';
+    var blockedOnly = failed.every(function (s) { return s.blocked; });
+
+    var lead = document.createElement('p');
+    lead.className = 'siteLinks__lead';
+    lead.textContent = blockedOnly
+      ? '次のサイトは自動取得を受け付けていないため、ボタンから直接ご確認ください。'
+      : '一部のサイトを取得できませんでした。ボタンから直接ご確認ください。';
+    box.appendChild(lead);
+
+    var wrap = document.createElement('div');
+    wrap.className = 'siteLinks';
+    failed.forEach(function (s) {
+      var a = document.createElement('a');
+      a.className = 'siteLink';
+      a.href = s.searchUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.innerHTML =
+        '<span class="siteLink__dot" style="background:' + esc(s.color || '#444') + '"></span>' +
+        '<span class="siteLink__txt"><b>' + esc(s.short) + '</b>で「' + esc(label) + '」を検索</span>' +
+        '<span class="siteLink__go">開く →</span>';
+      wrap.appendChild(a);
     });
+    box.appendChild(wrap);
   }
 
   function renderSiteFilter() {
