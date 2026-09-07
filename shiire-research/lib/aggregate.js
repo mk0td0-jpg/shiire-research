@@ -5,8 +5,10 @@ import { matchesCategory, looksLikeBrand, sizeRank } from './normalize.js';
 import twond from './sites/2ndstreet.js';
 import brandear from './sites/brandear.js';
 import trefac from './sites/trefac.js';
+import okoku from './sites/okoku.js';
+import offmall from './sites/offmall.js';
 
-export const SITES = [twond, brandear, trefac];
+export const SITES = [twond, brandear, trefac, okoku, offmall];
 
 // 自動取得を受け付けていないサイトへ何度もアクセスしないための記録
 const BLOCK_MINUTES = 30;
@@ -21,6 +23,15 @@ function dedupeKey(siteId, item) {
 }
 
 async function fetchSiteForBrand(site, brand, settings) {
+  // 自動取得しないと決めているサイトは、最初からボタン表示だけにする
+  if (site.linkOnly) {
+    return {
+      ok: false,
+      blocked: true,
+      error: site.linkReason || 'ボタンから開いてください',
+      items: [],
+    };
+  }
   const until = blockedUntil.get(site.id) || 0;
   if (until > Date.now()) {
     return { ok: false, blocked: true, error: 'このサイトは自動取得を受け付けていません', items: [] };
