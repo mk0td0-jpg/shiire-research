@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import two from '../lib/sites/2ndstreet.js';
 import brandear from '../lib/sites/brandear.js';
 import trefac from '../lib/sites/trefac.js';
+import okoku from '../lib/sites/okoku.js';
+import offmall from '../lib/sites/offmall.js';
 import { sizeRank, matchesCategory, looksLikeBrand, parsePrice } from '../lib/normalize.js';
 
 const config = JSON.parse(readFileSync(new URL('../config.json', import.meta.url), 'utf8'));
@@ -38,6 +40,34 @@ ok('トレファク: 商品名', () => assert.equal(t[0].name, 'ANTEPRIMA ショ
 ok('トレファク: サイズ', () => assert.equal(t[1].size, 'L'));
 ok('トレファク: 画像を大きいものに差し替え', () => assert.ok(t[0].image.includes('/w360/')));
 ok('トレファク: 状態推定', () => assert.equal(t[1].condition, '未使用'));
+
+const k = okoku.parse(fx('okoku'));
+ok('買取王国: 3件取得', () => assert.equal(k.length, 3));
+ok('買取王国: 価格', () => assert.ok(k.some((x) => x.price === 15500)));
+ok('買取王国: NEWが先頭', () => assert.equal(k[0].isNew, true));
+ok('買取王国: URLからクエリを除去', () => assert.ok(k.every((x) => x.url.indexOf('?') < 0)));
+ok('買取王国: 画像をhttpsに', () => assert.ok(k[0].image.startsWith('https://okoku.jp/')));
+ok('買取王国: 画像サイズを縮小', () => assert.ok(k[0].image.includes('width=500')));
+ok('買取王国: 商品名末尾のサイズを取得', () => {
+  const jacket = k.find((x) => x.name.indexOf('ジャケット') === 0);
+  assert.equal(jacket.size, 'M');
+});
+ok('買取王国: (L) L 表記のサイズ', () => {
+  const tee = k.find((x) => x.name.indexOf('半袖') === 0);
+  assert.equal(tee.size, 'L');
+});
+ok('買取王国: サイズでない語はサイズにしない', () => {
+  const coin = k.find((x) => x.name.indexOf('コインケース') === 0);
+  assert.equal(coin.size, '');
+});
+ok('買取王国: 別ブランドのコラボも本文で拾える', () =>
+  assert.ok(looksLikeBrand(k.find((x) => x.brand === 'PORTER'), ['WACKO MARIA'])));
+
+console.log('\n[ オフモール（リンクのみ） ]');
+ok('オフモール: linkOnly', () => assert.equal(offmall.linkOnly, true));
+ok('オフモール: 検索URL', () =>
+  assert.ok(offmall.searchPageUrl('AURALEE').startsWith('https://netmall.hardoff.co.jp/search/?q=')));
+ok('オフモール: 商品は取得しない', () => assert.equal(offmall.parse('<html></html>').length, 0));
 
 console.log('\n[ 価格・サイズ・カテゴリー ]');
 ok('価格: ￥1,234', () => assert.equal(parsePrice('￥1,234 税込'), 1234));
