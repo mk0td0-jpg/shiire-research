@@ -26,7 +26,8 @@
       "id": "wackomaria",
       "label": "ワコマリア",
       "keywords": ["WACKO MARIA", "ワコマリア"],
-      "minSize": "L"
+      "minSize": "L",
+      "allowUnknownSize": true
     },
     {
       "id": "pleatsplease",
