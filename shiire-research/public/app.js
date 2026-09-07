@@ -321,7 +321,7 @@
     var lead = document.createElement('p');
     lead.className = 'siteLinks__lead';
     lead.textContent = blockedOnly
-      ? '次のサイトは自動取得を受け付けていないため、ボタンから直接ご確認ください。'
+      ? '次のサイトは自動取得できないため、ボタンから直接ご確認ください。'
       : '一部のサイトを取得できませんでした。ボタンから直接ご確認ください。';
     box.appendChild(lead);
 
