@@ -63,11 +63,31 @@ ok('買取王国: サイズでない語はサイズにしない', () => {
 ok('買取王国: 別ブランドのコラボも本文で拾える', () =>
   assert.ok(looksLikeBrand(k.find((x) => x.brand === 'PORTER'), ['WACKO MARIA'])));
 
-console.log('\n[ オフモール（リンクのみ） ]');
-ok('オフモール: linkOnly', () => assert.equal(offmall.linkOnly, true));
-ok('オフモール: 検索URL', () =>
+console.log('\n[ オフモール ]');
+const o = offmall.parse(fx('offmall'));
+ok('オフモール: 2件取得', () => assert.equal(o.length, 2));
+ok('オフモール: 価格', () => assert.equal(o[0].price, 22000));
+ok('オフモール: 状態ランク', () => assert.equal(o[0].condition, 'Bランク(中古)'));
+ok('オフモール: 状態ランクA', () => assert.equal(o[1].condition, 'Aランク(美品)'));
+ok('オフモール: 商品URL', () => assert.ok(o[0].url.includes('/product/6508419')));
+ok('オフモール: 画像を大きく', () => assert.ok(o[0].image.includes('w=480,h=480')));
+ok('オフモール: ブランド名', () => assert.equal(o[0].brand, 'WACKO MARIA'));
+ok('オフモール: 検索URL（人が見る用）', () =>
   assert.ok(offmall.searchPageUrl('AURALEE').startsWith('https://netmall.hardoff.co.jp/search/?q=')));
-ok('オフモール: 商品は取得しない', () => assert.equal(offmall.parse('<html></html>').length, 0));
+
+// ブランドIDの自動判定
+const brandListHtml = fx('offmall-brandlist');
+const fakeCtx = { fetchHtml: async (url) => (url.includes('/brandlist/') ? brandListHtml : fx('offmall')) };
+await (async () => {
+  const r1 = await offmall.collect({ id: 'wm', label: 'ワコマリア', keywords: ['WACKO MARIA', 'ワコマリア'] }, fakeCtx);
+  ok('オフモール: ブランドIDを自動で見つける', () => assert.equal(r1.pageUrl, 'https://netmall.hardoff.co.jp/brand/2700/?s=1'));
+  const r2 = await offmall.collect({ id: 'im', label: 'イッセイミヤケ', keywords: ['ISSEY MIYAKE', 'イッセイミヤケ'] }, fakeCtx);
+  ok('オフモール: 日本語表記でも一致', () => assert.ok(r2.pageUrl.includes('/brand/2921/')));
+  const r3 = await offmall.collect({ id: 'x', label: 'ないブランド', keywords: ['ZZZZ_NOT_EXIST'] }, fakeCtx);
+  ok('オフモール: 未登録ブランドは案内を返す', () => assert.ok(r3.note && r3.items.length === 0));
+  const r4 = await offmall.collect({ id: 'y', label: '手動ID', keywords: ['X'], offmallBrandId: '9999' }, fakeCtx);
+  ok('オフモール: IDを直接指定できる', () => assert.ok(r4.pageUrl.includes('/brand/9999/')));
+})();
 
 console.log('\n[ 価格・サイズ・カテゴリー ]');
 ok('価格: ￥1,234', () => assert.equal(parsePrice('￥1,234 税込'), 1234));
