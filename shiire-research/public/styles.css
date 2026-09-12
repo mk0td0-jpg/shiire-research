@@ -66,8 +66,8 @@ button, input, select { font-family: inherit; font-size: 16px; }
 .brands {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 8px 12px;
   background: #fff;
   border-bottom: 1px solid var(--line);
 }
@@ -79,9 +79,10 @@ button, input, select { font-family: inherit; font-size: 16px; }
   background: #fff;
   color: var(--ink);
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
   cursor: pointer;
-  padding: 6px 8px;
+  padding: 4px 6px;
+  line-height: 1.25;
 }
 .brandBtn small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); }
 .brandBtn.is-active {
@@ -96,12 +97,12 @@ button, input, select { font-family: inherit; font-size: 16px; }
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   background: #fff;
   border-bottom: 1px solid var(--line);
 }
 .viewBtn {
-  min-height: 40px;
+  min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fff;
@@ -117,10 +118,12 @@ button, input, select { font-family: inherit; font-size: 16px; }
 /* ---------- toolbar ---------- */
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   align-items: center;
 }
+#sortSelect { flex: 1 1 130px; min-width: 120px; }
 .control {
   min-height: 40px;
   border: 1px solid var(--line);
@@ -328,3 +331,64 @@ button, input, select { font-family: inherit; font-size: 16px; }
 
 .skeleton { background: linear-gradient(90deg,#eceef1,#f5f6f8,#eceef1); background-size: 200% 100%; animation: sk 1.2s infinite; }
 @keyframes sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+
+/* ---------- 追加：取得状況バー ---------- */
+.topbar__actions { display: flex; align-items: center; gap: 6px; }
+.btn--icon { width: 36px; padding: 0; font-size: 17px; background: rgba(255,255,255,.14); }
+.btn--danger { color: #b42318; border-color: #f0c4c0; }
+
+.statusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+  min-height: 22px;
+}
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #dfe4ea;
+  background: rgba(255,255,255,.10);
+  border-radius: 999px;
+  padding: 3px 8px;
+  line-height: 1.5;
+  border: 0;
+  cursor: default;
+}
+.stat--link { cursor: pointer; text-decoration: none; color: #ffd9c7; background: rgba(232,98,42,.22); }
+.stat--error { color: #ffd2cd; background: rgba(212,60,45,.24); }
+.stat__n { opacity: .85; font-weight: 800; }
+.stat__spin { display: inline-block; width: 9px; height: 9px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.statusBar__time { font-size: 11px; color: #9aa3ad; align-self: center; margin-left: 2px; }
+
+/* ---------- 追加：カードの取得日時 ---------- */
+.card__time { font-size: 10px; color: #9aa3ad; }
+.card__sold {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.72); font-weight: 800; font-size: 13px; color: #b42318;
+}
+
+/* ---------- 追加：設定画面 ---------- */
+.settings__h { font-size: 14px; margin: 6px 0 0; }
+.settings__io { width: 100%; min-height: 84px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; font-size: 12px; font-family: ui-monospace, monospace; }
+.settings__btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.brandEditor { display: grid; gap: 10px; }
+.bcard { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; display: grid; gap: 8px; background: #fff; }
+.bcard__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bcard__name { font-weight: 800; font-size: 14px; }
+.bcard__del { border: 0; background: none; color: #b42318; font-weight: 700; font-size: 12px; min-height: 36px; cursor: pointer; }
+.bfield { display: grid; gap: 4px; }
+.bfield > span { font-size: 11px; font-weight: 700; color: var(--muted); }
+.bfield input, .bfield select { min-height: 40px; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; width: 100%; background: #fff; }
+.bfield--row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bcheck { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink); min-height: 36px; }
+.bcheck input { width: 20px; height: 20px; }
+
+/* ---------- 追加：他サイト案内を一覧の下へ ---------- */
+.notices { padding: 18px 12px 0; }
+.siteLinks__lead { margin: 0 2px 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
