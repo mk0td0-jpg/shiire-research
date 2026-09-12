@@ -382,7 +382,11 @@
         if (s.status === 'loading') {
           el.innerHTML = '<span class="stat__spin"></span>' + esc(s.short);
         } else if (s.status === 'ok') {
-          el.innerHTML = '✅ ' + esc(s.short) + '<span class="stat__n">' + s.count + '</span>';
+          if (!s.count && s.note) {
+            el.innerHTML = '➖ ' + esc(s.short) + '<span class="stat__n">登録なし</span>';
+          } else {
+            el.innerHTML = '✅ ' + esc(s.short) + '<span class="stat__n">' + s.count + '</span>';
+          }
           if (s.note) el.title = s.note;
         } else {
           el.innerHTML = '⚠️ ' + esc(s.short);
@@ -416,7 +420,9 @@
     var box = $('#notices');
     box.innerHTML = '';
     if (state.view !== 'all') return;
-    var failed = sourceList().filter(function (s) { return s.status === 'link' || s.status === 'error'; });
+    var failed = sourceList().filter(function (s) {
+      return s.status === 'link' || s.status === 'error' || (s.status === 'ok' && !s.count && s.note);
+    });
     if (!failed.length) return;
     var label = brandLabel(state.brandId) || '';
     var lead = document.createElement('p');
