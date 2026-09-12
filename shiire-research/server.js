@@ -35,8 +35,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/products') {
       const refresh = url.searchParams.get('refresh') === '1';
-      const data = await getProducts(url.searchParams.get('brand'), refresh);
-      return json(res, 200, data, refresh ? 'no-store' : 's-maxage=1800, stale-while-revalidate=3600');
+      const data = await getProducts({
+        brandId: url.searchParams.get('brand'),
+        siteId: url.searchParams.get('site'),
+        spec: url.searchParams.get('spec'),
+        refresh,
+      });
+      return json(res, 200, data, refresh ? 'no-store' : 's-maxage=1500, stale-while-revalidate=3600');
     }
 
     let rel = decodeURIComponent(url.pathname);

@@ -41,6 +41,20 @@
     }
   ],
 
+  "sites": {
+    "trefac": { "mode": "fetch" },
+    "okoku": { "mode": "fetch" },
+    "offmall": { "mode": "fetch" },
+    "2ndstreet": {
+      "mode": "link",
+      "reason": "サイト側のアクセス制限（Akamai）により、サーバーからは取得できません"
+    },
+    "brandear": {
+      "mode": "link",
+      "reason": "サイト側のアクセス制限（Akamai）により、サーバーからは取得できません"
+    }
+  },
+
   "categories": {
     "bag": {
       "label": "バッグ",
