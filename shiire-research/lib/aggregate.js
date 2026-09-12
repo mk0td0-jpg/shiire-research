@@ -10,7 +10,11 @@ import offmall from './sites/offmall.js';
 
 export const SITES = [twond, brandear, trefac, okoku, offmall];
 
-// 自動取得を受け付けていないサイトへ何度もアクセスしないための記録
+export function getSite(id) {
+  return SITES.find((s) => s.id === id) || null;
+}
+
+// 同じサイトに何度も断られ続けないようにするための記録
 const BLOCK_MINUTES = 30;
 const blockedUntil = new Map();
 
@@ -18,69 +22,94 @@ export function findBrand(config, brandId) {
   return config.brands.find((b) => b.id === brandId) || null;
 }
 
-function dedupeKey(siteId, item) {
-  return `${siteId}:${item.id || item.url}`;
+export function siteMode(config, siteId) {
+  const s = (config.sites && config.sites[siteId]) || {};
+  return s.mode === 'link' ? 'link' : 'fetch';
 }
 
-async function fetchSiteForBrand(site, brand, settings) {
-  // 自動取得しないと決めているサイトは、最初からボタン表示だけにする
-  if (site.linkOnly) {
-    return {
-      ok: false,
-      blocked: true,
-      error: site.linkReason || 'ボタンから開いてください',
-      items: [],
-    };
-  }
-  const until = blockedUntil.get(site.id) || 0;
-  if (until > Date.now()) {
-    return { ok: false, blocked: true, error: 'このサイトは自動取得を受け付けていません', items: [] };
-  }
+export function siteReason(config, siteId) {
+  const s = (config.sites && config.sites[siteId]) || {};
+  return s.reason || 'このサイトからは自動取得できません';
+}
+
+function dedupeKey(siteId, item) {
+  return siteId + ':' + (item.id || item.url);
+}
+
+// サイト1つぶんの取得。失敗しても例外は投げず、状態を返す。
+async function collectFromSite(site, brand, settings) {
+  const ctx = {
+    fetchHtml: (url) =>
+      fetchHtml(url, {
+        intervalMs: settings.requestIntervalMs,
+        timeoutMs: settings.requestTimeoutMs,
+      }),
+  };
+
   const collected = [];
   const seen = new Set();
   let lastError = null;
   let anySuccess = false;
+  let note = null;
 
-  for (const keyword of brand.keywords) {
+  const push = (list) => {
+    for (const item of list || []) {
+      const key = dedupeKey(site.id, item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(item);
+      if (collected.length >= settings.maxItemsPerSource) break;
+    }
+  };
+
+  if (typeof site.collect === 'function') {
+    // サイト独自の取得方法（例：オフモールのブランド別一覧）
     try {
-      const html = await fetchHtml(site.fetchUrl(keyword), {
-        intervalMs: settings.requestIntervalMs,
-        timeoutMs: settings.requestTimeoutMs,
-      });
-      const parsed = site.parse(html);
+      const res = await site.collect(brand, ctx);
       anySuccess = true;
-      for (const item of parsed) {
-        const key = dedupeKey(site.id, item);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        collected.push(item);
-        if (collected.length >= settings.maxItemsPerSource) break;
-      }
+      note = res && res.note ? res.note : null;
+      push(res && res.items);
     } catch (err) {
       lastError = err;
-      if (err.status === 401 || err.status === 403) {
-        blockedUntil.set(site.id, Date.now() + BLOCK_MINUTES * 60 * 1000);
-        break;
-      }
     }
-    if (collected.length >= settings.maxItemsPerSource) break;
+  } else {
+    for (const keyword of brand.keywords) {
+      try {
+        const html = await ctx.fetchHtml(site.fetchUrl(keyword));
+        anySuccess = true;
+        push(site.parse(html));
+      } catch (err) {
+        lastError = err;
+        if (err.status === 401 || err.status === 403) {
+          blockedUntil.set(site.id, Date.now() + BLOCK_MINUTES * 60 * 1000);
+          break;
+        }
+      }
+      if (collected.length >= settings.maxItemsPerSource) break;
+    }
   }
 
   if (!anySuccess) {
     let reason = '取得できませんでした';
+    let blocked = false;
     if (lastError) {
-      if (lastError.code === 'ROBOTS_DISALLOW') reason = 'robots.txt により取得できません';
-      else if (lastError.status === 401 || lastError.status === 403)
-        reason = 'このサイトは自動取得を受け付けていません';
-      else if (lastError.status) reason = '取得できませんでした（' + lastError.status + '）';
-      else if (lastError.name === 'AbortError' || lastError.name === 'TimeoutError')
+      if (lastError.code === 'ROBOTS_DISALLOW') {
+        reason = 'robots.txt により取得できません';
+        blocked = true;
+      } else if (lastError.status === 401 || lastError.status === 403) {
+        reason = 'サイト側のアクセス制限により取得できません';
+        blocked = true;
+      } else if (lastError.status) {
+        reason = '取得できませんでした（' + lastError.status + '）';
+      } else if (lastError.name === 'AbortError' || lastError.name === 'TimeoutError') {
         reason = '取得できませんでした（時間切れ）';
-      else if (lastError.message)
+      } else if (lastError.message) {
         reason = '取得できませんでした（' + String(lastError.message).slice(0, 40) + '）';
+      }
     }
-    return { ok: false, error: reason, items: [] };
+    return { ok: false, blocked, error: reason, items: [], note };
   }
-  return { ok: true, error: null, items: collected };
+  return { ok: true, blocked: false, error: null, items: collected, note };
 }
 
 function applyBrandRules(items, brand, config) {
@@ -100,69 +129,132 @@ function applyBrandRules(items, brand, config) {
   });
 }
 
-export async function loadBrand(config, brandId, { refresh = false } = {}) {
-  const brand = findBrand(config, brandId);
-  if (!brand) throw Object.assign(new Error('未登録のブランドです'), { status: 404 });
-
+// 1ブランド × 1サイト。画面から並行して呼べるようにしている。
+export async function loadBrandSite(config, brand, site, { refresh = false } = {}) {
   const settings = config.settings;
-  const cacheKey = `brand:${brandId}`;
+  const cacheKey = 'bs:' + brand.id + ':' + site.id + ':' + (brand.rev || '');
   if (!refresh) {
     const cached = getCache(cacheKey);
     if (cached) return { ...cached, cached: true };
   }
 
-  const sources = [];
-  const all = [];
+  const mode = siteMode(config, site.id);
+  const searchUrl = site.searchPageUrl(brand.keywords[0]);
+  const fetchedAt = new Date().toISOString();
 
-  // サイトごとに並行して取得する（同じサイトへの連続アクセスは間隔をあけたまま）
-  const results = await Promise.all(
-    SITES.map((site) =>
-      fetchSiteForBrand(site, brand, settings).catch(() => ({
-        ok: false,
-        error: '取得できませんでした',
-        items: [],
-      }))
-    )
-  );
+  let source;
+  let items = [];
 
-  SITES.forEach((site, i) => {
-    const result = results[i];
-    const filtered = applyBrandRules(result.items, brand, config);
-    filtered.forEach((item, index) => {
-      all.push({
-        ...item,
-        uid: `${site.id}_${item.id}`,
-        siteId: site.id,
-        siteName: site.name,
-        siteShort: site.short,
-        siteColor: site.color,
-        sizeRank: sizeRank(item.size, config.sizeAliases),
-        rank: index,
-      });
-    });
-    sources.push({
+  if (mode === 'link') {
+    source = {
       id: site.id,
       name: site.name,
       short: site.short,
       color: site.color,
-      ok: result.ok,
-      blocked: result.blocked === true || result.error === 'このサイトは自動取得を受け付けていません',
-      error: result.error,
-      count: filtered.length,
-      searchUrl: site.searchPageUrl(brand.keywords[0]),
-    });
+      status: 'link',
+      count: 0,
+      error: siteReason(config, site.id),
+      note: null,
+      searchUrl,
+      fetchedAt,
+    };
+  } else {
+    const until = blockedUntil.get(site.id) || 0;
+    const result =
+      until > Date.now()
+        ? { ok: false, blocked: true, error: 'サイト側のアクセス制限により取得できません', items: [], note: null }
+        : await collectFromSite(site, brand, settings);
+
+    const filtered = applyBrandRules(result.items, brand, config);
+    items = filtered.map((item, index) => ({
+      ...item,
+      uid: site.id + '_' + item.id,
+      siteId: site.id,
+      siteName: site.name,
+      siteShort: site.short,
+      siteColor: site.color,
+      sizeRank: sizeRank(item.size, config.sizeAliases),
+      rank: index,
+      inStock: item.inStock === false ? false : true,
+      fetchedAt,
+    }));
+
+    source = {
+      id: site.id,
+      name: site.name,
+      short: site.short,
+      color: site.color,
+      status: result.ok ? 'ok' : result.blocked ? 'link' : 'error',
+      count: items.length,
+      error: result.ok ? null : result.error,
+      note: result.note || null,
+      searchUrl,
+      fetchedAt,
+    };
+  }
+
+  const payload = { brand: publicBrand(brand), source, items, fetchedAt, cached: false };
+  setCache(cacheKey, payload, settings.cacheMinutes * 60 * 1000);
+  return payload;
+}
+
+export function publicBrand(brand) {
+  return {
+    id: brand.id,
+    label: brand.label,
+    keywords: brand.keywords,
+    category: brand.category || null,
+    minSize: brand.minSize || null,
+    allowUnknownSize: brand.allowUnknownSize === true,
+    sites: brand.sites || null,
+  };
+}
+
+export function sitesForBrand(config, brand) {
+  const allow = Array.isArray(brand.sites) && brand.sites.length ? brand.sites : null;
+  return SITES.filter((s) => (allow ? allow.indexOf(s.id) >= 0 : true));
+}
+
+// まとめて取得（互換用・1リクエストで全部ほしいとき）
+export async function loadBrand(config, brandId, { refresh = false } = {}) {
+  const brand = findBrand(config, brandId);
+  if (!brand) throw Object.assign(new Error('未登録のブランドです'), { status: 404 });
+
+  const targets = sitesForBrand(config, brand);
+  const results = await Promise.allSettled(
+    targets.map((site) => loadBrandSite(config, brand, site, { refresh }))
+  );
+
+  const sources = [];
+  const all = [];
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      sources.push(r.value.source);
+      all.push(...r.value.items);
+    } else {
+      const site = targets[i];
+      sources.push({
+        id: site.id,
+        name: site.name,
+        short: site.short,
+        color: site.color,
+        status: 'error',
+        count: 0,
+        error: '取得できませんでした',
+        note: null,
+        searchUrl: site.searchPageUrl(brand.keywords[0]),
+        fetchedAt: new Date().toISOString(),
+      });
+    }
   });
 
-  // 全サイトを混ぜたうえで、新着順（各サイトの並び順を交互に）に整える
-  all.sort((a, b) => a.rank - b.rank || a.siteId.localeCompare(b.siteId));
+  all.sort((a, b) => a.rank - b.rank || String(a.siteId).localeCompare(String(b.siteId)));
 
-  const payload = {
-    brand: { id: brand.id, label: brand.label, keywords: brand.keywords, category: brand.category || null, minSize: brand.minSize || null },
+  return {
+    brand: publicBrand(brand),
     items: all,
     sources,
     fetchedAt: new Date().toISOString(),
     cached: false,
   };
-  setCache(cacheKey, payload, settings.cacheMinutes * 60 * 1000);
-  return payload;
 }
