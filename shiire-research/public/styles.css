@@ -392,3 +392,8 @@ button, input, select { font-family: inherit; font-size: 16px; }
 /* ---------- 追加：他サイト案内を一覧の下へ ---------- */
 .notices { padding: 18px 12px 0; }
 .siteLinks__lead { margin: 0 2px 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
+
+/* ---------- 追加：ブラウザからの取り込み ---------- */
+.stat--imported { cursor: pointer; text-decoration: none; color: #cfe9d7; background: rgba(47,125,92,.30); }
+.siteLinks__hint { margin: -2px 2px 10px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+.siteLinks__hint a { color: var(--accent); font-weight: 700; }

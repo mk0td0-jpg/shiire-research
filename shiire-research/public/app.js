@@ -11,6 +11,7 @@
     seen: 'sr.seen',
     conf: 'sr.settings',
     brands: 'sr.brands',
+    imported: 'sr.imported',
     last: 'sr.lastBrand'
   };
 
@@ -28,6 +29,7 @@
   var snapshots = load(K.snap, {});
   var seen = load(K.seen, {});
   var settings = Object.assign({ shipping: 850, feeRate: 0.1 }, load(K.conf, {}));
+  var imported = load(K.imported, {});   // 自分のブラウザから取り込んだ商品
 
   /* ---------------- 状態 ---------------- */
   var state = {
@@ -36,7 +38,8 @@
     brandId: null,
     view: 'all',
     sources: {},           // siteId -> 取得状況
-    itemsBySite: {},       // siteId -> 商品配列
+    itemsBySite: {},       // siteId -> 商品配列（サーバー取得）
+    importedBySite: {},    // siteId -> 商品配列（自分のブラウザから取り込み）
     newIds: {},
     loading: false,
     sort: 'new',
@@ -113,6 +116,7 @@
   function init() {
     bindUi();
     registerSW();
+    setupImport();
     api('/api/config').then(function (cfg) {
       state.server = cfg;
       if (settings.shipping == null) settings.shipping = cfg.settings.shippingCost;
@@ -130,9 +134,18 @@
       });
 
       renderBrands();
-      var last = load(K.last, null);
-      var exists = state.brands.some(function (b) { return b.id === last; });
-      selectBrand(exists ? last : (state.brands[0] && state.brands[0].id));
+      var pending = state.pendingImport;
+      var target = pending ? brandForKeyword(pending.keyword) : null;
+      if (target) {
+        selectBrand(target.id);
+        afterImport(pending, false);
+      } else {
+        var last = load(K.last, null);
+        var exists = state.brands.some(function (b) { return b.id === last; });
+        selectBrand(exists ? last : (state.brands[0] && state.brands[0].id));
+        if (pending) afterImport(pending, false);
+      }
+      state.pendingImport = null;
       setInterval(renderStatusBar, 30000);
     }).catch(function (e) {
       grid.innerHTML = '';
@@ -183,6 +196,7 @@
     state.loading = true;
     state.sources = {};
     state.itemsBySite = {};
+    state.importedBySite = buildImported(brand);
 
     var sites = targetSites(brand);
     sites.forEach(function (s) {
@@ -208,7 +222,7 @@
         (refresh ? '&refresh=1' : '');
       api(url).then(function (data) {
         if (token !== state.reqToken) return;
-        state.sources[s.id] = data.source;
+        state.sources[s.id] = withImported(data.source);
         state.itemsBySite[s.id] = data.items || [];
         afterSiteLoaded(token);
       }).catch(function (e) {
@@ -234,6 +248,7 @@
   function allItems() {
     var out = [];
     Object.keys(state.itemsBySite).forEach(function (k) { out = out.concat(state.itemsBySite[k]); });
+    Object.keys(state.importedBySite).forEach(function (k) { out = out.concat(state.importedBySite[k]); });
     return out;
   }
 
@@ -368,7 +383,15 @@
     var newest = null;
     sources.forEach(function (s) {
       var el;
-      if (s.status === 'link') {
+      if (s.status === 'imported') {
+        el = document.createElement('a');
+        el.className = 'stat stat--imported';
+        el.href = s.searchUrl || '#';
+        el.target = '_blank';
+        el.rel = 'noopener';
+        el.innerHTML = '📥 ' + esc(s.short) + '<span class="stat__n">' + s.count + '</span>';
+        el.title = '自分のブラウザで取り込んだ商品です。押すとサイトを開いて取り込み直せます。';
+      } else if (s.status === 'link') {
         el = document.createElement('a');
         el.className = 'stat stat--link';
         el.href = s.searchUrl || '#';
@@ -429,6 +452,13 @@
     lead.className = 'siteLinks__lead';
     lead.textContent = '自動取得できないサイトも確認する';
     box.appendChild(lead);
+    if (failed.some(function (s) { return s.status === 'link'; })) {
+      var hint = document.createElement('p');
+      hint.className = 'siteLinks__hint';
+      hint.innerHTML = 'セカスト・ブランディアは、拡張機能かブックマークレットを入れると' +
+        'この一覧に混ぜて表示できます。<a href="/import.html">設定のしかた →</a>';
+      box.appendChild(hint);
+    }
     var wrap = document.createElement('div');
     wrap.className = 'siteLinks';
     failed.forEach(function (s) {
@@ -704,6 +734,247 @@
     persistBrands();
     renderBrandEditor();
     toast('表示名と検索キーワードを入れてください');
+  }
+
+
+  /* ---------------- 自分のブラウザからの取り込み ---------------- */
+  // セカスト・ブランディアはサーバーから取得できないため、
+  // 拡張機能やブックマークレットが読み取った商品をここで受け取る。
+  var IMPORT_EXPIRE_MS = 7 * 24 * 60 * 60 * 1000;
+
+  function normKey(s) {
+    return String(s == null ? '' : s).toUpperCase().replace(/[\s・･‐\-'’.,()（）]/g, '');
+  }
+
+  function toHalf(s) {
+    return String(s == null ? '' : s)
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xfee0); })
+      .replace(/　/g, ' ');
+  }
+
+  function cleanSize(t) {
+    var v = toHalf(t).replace(/サイズ/g, '').replace(/[：:]/g, '').replace(/\s+/g, ' ').trim();
+    if (!v || v === '-' || v === '−') return '';
+    return v;
+  }
+
+  function sizeRankOf(sizeText) {
+    var aliases = (state.server && state.server.sizeAliases) || {};
+    var v = cleanSize(sizeText).toUpperCase();
+    if (!v) return null;
+    if (/^(F|FREE|ONE|ONESIZE|フリー|フリーサイズ|-|ー|なし)$/i.test(v)) return null;
+    if (Object.prototype.hasOwnProperty.call(aliases, v)) return aliases[v];
+    var tokens = v.match(/[A-Z]+|\d+/g) || [];
+    for (var i = 0; i < tokens.length; i++) {
+      if (Object.prototype.hasOwnProperty.call(aliases, tokens[i])) return aliases[tokens[i]];
+    }
+    return null;
+  }
+
+  function matchesBrandRules(item, brand) {
+    var hay = toHalf((item.brand || '') + ' ' + (item.name || '')).toUpperCase().replace(/[\s・･‐\-]/g, '');
+    var okBrand = (brand.keywords || []).some(function (k) {
+      var key = toHalf(k).toUpperCase().replace(/[\s・･‐\-]/g, '');
+      return key.length >= 2 && hay.indexOf(key) >= 0;
+    });
+    if (!okBrand) return false;
+
+    var defs = (state.server && state.server.categoryDefs) || {};
+    var cat = brand.category ? defs[brand.category] : null;
+    if (cat) {
+      var text = ((item.name || '') + ' ' + (item.brand || '')).toUpperCase();
+      var inc = (cat.include || []).some(function (w) { return text.indexOf(String(w).toUpperCase()) >= 0; });
+      if (!inc) return false;
+      var exc = (cat.exclude || []).some(function (w) { return text.indexOf(String(w).toUpperCase()) >= 0; });
+      if (exc) return false;
+    }
+    if (brand.minSize) {
+      var min = sizeRankOf(brand.minSize);
+      var r = sizeRankOf(item.size);
+      if (r === null) return brand.allowUnknownSize === true;
+      if (min !== null && r < min) return false;
+    }
+    return true;
+  }
+
+  function siteMeta(siteId) {
+    var sites = (state.server && state.server.sites) || [];
+    for (var i = 0; i < sites.length; i++) if (sites[i].id === siteId) return sites[i];
+    return null;
+  }
+
+  // 保存してある取り込み商品から、いま選んでいるブランドに合うものを組み立てる
+  function buildImported(brand) {
+    var out = {};
+    if (!brand) return out;
+    var keys = (brand.keywords || []).map(normKey).filter(function (k) { return k.length >= 2; });
+    Object.keys(imported).forEach(function (siteId) {
+      var meta = siteMeta(siteId);
+      if (!meta) return;
+      if (brand.sites && brand.sites.length && brand.sites.indexOf(siteId) < 0) return;
+      var entries = imported[siteId] || {};
+      var picked = [];
+      Object.keys(entries).forEach(function (k) {
+        var e = entries[k];
+        if (!e || !e.items) return;
+        if (Date.now() - new Date(e.at).getTime() > IMPORT_EXPIRE_MS) return;
+        var hit = keys.some(function (bk) { return k === bk || k.indexOf(bk) >= 0 || bk.indexOf(k) >= 0; });
+        if (hit) picked.push(e);
+      });
+      if (!picked.length) return;
+      var seenIds = {};
+      var items = [];
+      picked.sort(function (a, b) { return new Date(b.at) - new Date(a.at); });
+      picked.forEach(function (e) {
+        e.items.forEach(function (it) {
+          var uid = siteId + '_' + it.id;
+          if (seenIds[uid]) return;
+          if (!matchesBrandRules(it, brand)) return;
+          seenIds[uid] = true;
+          items.push({
+            uid: uid, id: it.id, url: it.url, image: it.image || null,
+            brand: it.brand || '', name: it.name || '', size: it.size || '',
+            condition: it.condition || '', price: it.price,
+            siteId: siteId, siteName: meta.name, siteShort: meta.short, siteColor: meta.color,
+            rank: items.length, inStock: true, fetchedAt: e.at, imported: true
+          });
+        });
+      });
+      if (items.length) out[siteId] = items;
+    });
+    return out;
+  }
+
+  function withImported(source) {
+    var list = state.importedBySite[source.id];
+    if (!list || !list.length) return source;
+    return Object.assign({}, source, {
+      status: 'imported',
+      count: list.length,
+      fetchedAt: list[0].fetchedAt || source.fetchedAt
+    });
+  }
+
+  function saveImported() {
+    // 古いものを捨ててから保存する
+    var now = Date.now();
+    Object.keys(imported).forEach(function (siteId) {
+      var site = imported[siteId];
+      Object.keys(site).forEach(function (k) {
+        if (!site[k] || now - new Date(site[k].at).getTime() > IMPORT_EXPIRE_MS) delete site[k];
+      });
+      var keys = Object.keys(site).sort(function (a, b) { return new Date(site[b].at) - new Date(site[a].at); });
+      keys.slice(8).forEach(function (k) { delete site[k]; });
+    });
+    save(K.imported, imported);
+  }
+
+  // 取り込み1件ぶんを受け取る
+  function acceptImport(siteId, keyword, at, items) {
+    if (!siteId || !keyword || !items || !items.length) return 0;
+    if (!imported[siteId]) imported[siteId] = {};
+    imported[siteId][normKey(keyword)] = { keyword: keyword, at: at || new Date().toISOString(), items: items };
+    saveImported();
+    return items.length;
+  }
+
+  function decodeHashImport(hash) {
+    var m = /[#&]import=([^&]+)/.exec(hash || '');
+    if (!m) return null;
+    var b = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    var bin = atob(b);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var data = JSON.parse(new TextDecoder().decode(bytes));
+    if (!data || data.v !== 1 || !Array.isArray(data.i)) return null;
+    return {
+      siteId: data.s,
+      keyword: data.k,
+      at: data.t,
+      items: data.i.map(function (a) {
+        return { id: a[0], url: a[1], image: a[2], brand: a[3], name: a[4], size: a[5], condition: a[6], price: a[7] };
+      }).filter(function (x) { return x.url && x.price; })
+    };
+  }
+
+  function refreshImported() {
+    state.importedBySite = buildImported(currentBrand());
+    Object.keys(state.sources).forEach(function (id) {
+      state.sources[id] = withImported(state.sources[id]);
+    });
+    render();
+  }
+
+  // 取り込んだ検索ワードに合うブランドを探す
+  function brandForKeyword(keyword) {
+    var k = normKey(keyword);
+    if (!k) return null;
+    for (var i = 0; i < state.brands.length; i++) {
+      var b = state.brands[i];
+      var hit = (b.keywords || []).some(function (x) {
+        var bk = normKey(x);
+        return bk.length >= 2 && (bk === k || k.indexOf(bk) >= 0 || bk.indexOf(k) >= 0);
+      });
+      if (hit) return b;
+    }
+    return null;
+  }
+
+  function handleHashImport() {
+    try {
+      var got = decodeHashImport(location.hash);
+      if (!got) return null;
+      var n = acceptImport(got.siteId, got.keyword, got.at, got.items);
+      history.replaceState(null, '', location.pathname + location.search);
+      return n ? got : null;
+    } catch (e) {
+      setTimeout(function () { toast('取り込めませんでした'); }, 600);
+      return null;
+    }
+  }
+
+  function afterImport(got, ready) {
+    var n = got.items.length;
+    var target = brandForKeyword(got.keyword);
+    var label = target ? target.label : got.keyword;
+    if (ready && target && target.id !== state.brandId) {
+      selectBrand(target.id);
+    } else if (ready) {
+      refreshImported();
+    }
+    setTimeout(function () { toast(label + 'を' + n + '件 取り込みました'); }, ready ? 200 : 800);
+  }
+
+  function setupImport() {
+    // ブックマークレットからの受け取り（URLの #import=...）
+    var first = handleHashImport();
+    if (first) state.pendingImport = first;
+
+    window.addEventListener('hashchange', function () {
+      var got = handleHashImport();
+      if (got) afterImport(got, true);
+    });
+
+    // Chrome拡張からの受け取り
+    window.addEventListener('message', function (e) {
+      if (e.source !== window) return;
+      var d = e.data;
+      if (!d || d.source !== 'shiire-ext' || d.type !== 'data' || !d.imported) return;
+      var changed = 0;
+      Object.keys(d.imported).forEach(function (siteId) {
+        var site = d.imported[siteId] || {};
+        Object.keys(site).forEach(function (k) {
+          var entry = site[k];
+          if (!entry || !entry.items || !entry.items.length) return;
+          var cur = (imported[siteId] || {})[normKey(entry.keyword || k)];
+          if (cur && cur.at === entry.at) return;
+          changed += acceptImport(siteId, entry.keyword || k, entry.at, entry.items);
+        });
+      });
+      if (changed && state.server) refreshImported();
+    });
+    try { window.postMessage({ source: 'shiire-page', type: 'request' }, location.origin); } catch (e) {}
   }
 
   /* ---------------- UIのイベント ---------------- */
