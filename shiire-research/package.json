@@ -8,6 +8,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node test/run.js",
+    "test:import": "node test/import.mjs",
+    "test:ext": "node test/extension.mjs",
     "test:ui": "node test/ui.mjs"
   },
   "dependencies": {
