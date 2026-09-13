@@ -46,7 +46,9 @@
     newOnly: false,
     stockOnly: true,
     filters: { sites: {}, min: '', max: '', sizes: {}, keyword: '' },
-    reqToken: 0
+    reqToken: 0,
+    extCaps: {},           // 拡張機能ができること（open: 裏で1ページずつ開ける）
+    collect: { running: false, manual: false, queue: [], idx: 0, got: 0, currentId: null, timer: null, gapTimer: null }
   };
 
   var $ = function (sel) { return document.querySelector(sel); };
@@ -349,6 +351,7 @@
 
   function render() {
     renderStatusBar();
+    renderCollect();
     renderNotices();
     renderSiteFilter();
     renderSizeFilter();
@@ -960,7 +963,10 @@
     window.addEventListener('message', function (e) {
       if (e.source !== window) return;
       var d = e.data;
-      if (!d || d.source !== 'shiire-ext' || d.type !== 'data' || !d.imported) return;
+      if (!d || d.source !== 'shiire-ext') return;
+      if (d.caps) state.extCaps = d.caps;
+      if (d.type === 'done') { onCollectDone(d); return; }
+      if (d.type !== 'data' || !d.imported) return;
       var changed = 0;
       Object.keys(d.imported).forEach(function (siteId) {
         var site = d.imported[siteId] || {};
@@ -973,8 +979,232 @@
         });
       });
       if (changed && state.server) refreshImported();
+      else if (state.server) renderCollect();
     });
     try { window.postMessage({ source: 'shiire-page', type: 'request' }, location.origin); } catch (e) {}
+  }
+
+  /* ---------------- 一括取り込み（セカスト・ブランディア） ---------------- */
+  // サーバーから取れない2サイトを、ブランドごとにまとめて取り込む。
+  // Chrome拡張があればボタン1つで自動。無ければ「開く」を順に押してもらう案内表になる。
+  var COLLECT_GAP_MS = 4000;                  // 次のページを開くまで必ず待つ（サイトへの配慮）
+  var COLLECT_TIMEOUT_MS = 25000;             // 1ページの上限
+  var COLLECT_STALE_MS = 6 * 60 * 60 * 1000;  // これより古い取り込みは「取り直し」対象
+
+  function linkSites() {
+    var sites = (state.server && state.server.sites) || [];
+    return sites.filter(function (s) { return s.mode === 'link' && s.searchUrlTemplate; });
+  }
+
+  function searchUrlFor(site, keyword) {
+    return String(site.searchUrlTemplate).replace('__Q__', encodeURIComponent(keyword));
+  }
+
+  function importedEntry(siteId, keyword) {
+    return (imported[siteId] || {})[normKey(keyword)] || null;
+  }
+
+  // 取り込むべき「ブランド × サイト」の一覧を作る。all=false なら未取得と古いものだけ。
+  function collectTargets(all) {
+    var out = [];
+    var sites = linkSites();
+    if (!sites.length) return out;
+    state.brands.forEach(function (b) {
+      var keyword = (b.keywords || []).filter(Boolean)[0];
+      if (!keyword) return;
+      sites.forEach(function (s) {
+        if (b.sites && b.sites.length && b.sites.indexOf(s.id) < 0) return;
+        var e = importedEntry(s.id, keyword);
+        var fresh = !!e && (Date.now() - new Date(e.at).getTime()) < COLLECT_STALE_MS;
+        if (!all && fresh) return;
+        out.push({
+          brandId: b.id, brandLabel: b.label,
+          siteId: s.id, siteShort: s.short, siteColor: s.color,
+          keyword: keyword, url: searchUrlFor(s, keyword),
+          fresh: fresh, n: e ? (e.items || []).length : 0, at: e ? e.at : null
+        });
+      });
+    });
+    return out;
+  }
+
+  function post(msg) {
+    try {
+      var m = { source: 'shiire-page' };
+      Object.keys(msg).forEach(function (k) { m[k] = msg[k]; });
+      window.postMessage(m, location.origin);
+    } catch (e) {}
+  }
+
+  /* --- 拡張機能に頼んで1ページずつ自動で取り込む --- */
+  function startCollect(all) {
+    var c = state.collect;
+    if (c.running) return;
+    var queue = collectTargets(all);
+    if (!queue.length) { toast('取り込み済みです'); return; }
+    c.running = true; c.queue = queue; c.idx = 0; c.got = 0;
+    c.currentId = null; c.timer = null; c.gapTimer = null;
+    renderCollect();
+    runCollectStep();
+  }
+
+  function runCollectStep() {
+    var c = state.collect;
+    if (!c.running) return;
+    var t = c.queue[c.idx];
+    if (!t) { endCollect(); return; }
+    var id = 'c' + Date.now() + '_' + c.idx;
+    c.currentId = id;
+    c.timer = setTimeout(function () {
+      onCollectDone({ id: id, n: 0, reason: 'timeout' });
+    }, COLLECT_TIMEOUT_MS);
+    post({ type: 'open', url: t.url, id: id });
+    renderCollect();
+  }
+
+  function onCollectDone(msg) {
+    var c = state.collect;
+    if (!c.running || !msg || msg.id !== c.currentId) return;
+    clearTimeout(c.timer);
+    c.timer = null;
+    c.currentId = null;
+    var t = c.queue[c.idx];
+    if (t) { t.result = msg.reason; t.gotN = msg.n || 0; c.got += msg.n || 0; }
+    c.idx += 1;
+    if (c.idx >= c.queue.length) { endCollect(); return; }
+    renderCollect();
+    c.gapTimer = setTimeout(runCollectStep, COLLECT_GAP_MS);
+  }
+
+  function stopCollect() {
+    var c = state.collect;
+    if (!c.running) return;
+    clearTimeout(c.timer); clearTimeout(c.gapTimer);
+    if (c.currentId) post({ type: 'cancel', id: c.currentId });
+    c.running = false; c.currentId = null; c.timer = null; c.gapTimer = null;
+    refreshImported();
+    toast('取り込みを止めました');
+  }
+
+  function endCollect() {
+    var c = state.collect;
+    var got = c.got;
+    var pages = c.idx;
+    c.running = false; c.currentId = null;
+    clearTimeout(c.timer); clearTimeout(c.gapTimer);
+    refreshImported();
+    toast(pages + 'ページから ' + got + '件 取り込みました');
+  }
+
+  /* --- 表示 --- */
+  function collectItemRow(t, mode, mark) {
+    var li = document.createElement('li');
+    li.className = 'collect__item is-' + mode;
+    li.innerHTML =
+      '<span class="collect__dot" style="background:' + esc(t.siteColor || '#444') + '"></span>' +
+      '<span class="collect__txt">' + esc(t.siteShort) + '「' + esc(t.brandLabel) + '」</span>' +
+      '<span class="collect__mark">' + esc(mark || '') + '</span>';
+    return li;
+  }
+
+  function renderCollect() {
+    var box = $('#collectPanel');
+    if (!box) return;
+    var sites = linkSites();
+    if (!sites.length || state.view !== 'all') { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = '';
+
+    var c = state.collect;
+    var auto = !!state.extCaps.open;
+    var todo = collectTargets(false).length;
+    var names = sites.map(function (s) { return s.short; }).join('・');
+
+    var bar = document.createElement('div');
+    bar.className = 'collect__bar';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'collectBtn';
+    btn.className = 'collect__btn';
+
+    if (c.running) {
+      btn.classList.add('is-running');
+      btn.innerHTML = '<span class="collect__spin"></span>取り込み中 ' + (c.idx + 1) + '/' + c.queue.length + '（押すと中止）';
+      btn.addEventListener('click', stopCollect);
+    } else if (auto) {
+      btn.textContent = todo ? '📥 ' + names + 'を取り込む（' + todo + '件）' : '📥 ' + names + 'を取り直す';
+      btn.addEventListener('click', function () { startCollect(todo === 0); });
+    } else {
+      btn.textContent = todo
+        ? '📥 ' + names + 'を取り込む（残り' + todo + '件）'
+        : '📥 ' + names + 'の取り込み状況';
+      btn.classList.toggle('is-open', !!c.open);
+      btn.addEventListener('click', function () { c.open = !c.open; renderCollect(); });
+    }
+    bar.appendChild(btn);
+
+    if (auto && !c.running && todo) {
+      var again = document.createElement('button');
+      again.type = 'button';
+      again.className = 'collect__sub';
+      again.textContent = '全部取り直す';
+      again.addEventListener('click', function () { startCollect(true); });
+      bar.appendChild(again);
+    }
+    box.appendChild(bar);
+
+    // 自動で動いている間の進み具合
+    if (c.running) {
+      var list = document.createElement('ol');
+      list.className = 'collect__list';
+      c.queue.forEach(function (t, i) {
+        var mode = i < c.idx ? 'done' : (i === c.idx ? 'now' : 'wait');
+        var mark = mode === 'done' ? (t.gotN ? '✓ ' + t.gotN + '件' : '−') : (mode === 'now' ? '…' : '');
+        list.appendChild(collectItemRow(t, mode, mark));
+      });
+      box.appendChild(list);
+      return;
+    }
+
+    // 拡張機能が無いときの案内表（開いたときだけ）
+    if (!auto && c.open) {
+      var all = collectTargets(true);
+      var ol = document.createElement('ol');
+      ol.className = 'collect__list';
+      all.forEach(function (t) {
+        var mode = t.fresh ? 'done' : 'wait';
+        var li = collectItemRow(t, mode, t.fresh ? '✓ ' + t.n + '件' : '');
+        if (!t.fresh) {
+          var a = document.createElement('a');
+          a.className = 'collect__open';
+          a.href = t.url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = t.n ? '取り直す →' : '開く →';
+          li.appendChild(a);
+        }
+        ol.appendChild(li);
+      });
+      box.appendChild(ol);
+      var how = document.createElement('p');
+      how.className = 'collect__note';
+      how.innerHTML = '「開く →」でページを開いたら、ブックマークの<b>「仕入れ取り込み」</b>をタップしてください。' +
+        'この画面に戻って✓が付きます。<a href="/import.html">設定のしかた →</a>';
+      box.appendChild(how);
+      return;
+    }
+
+    var note = document.createElement('p');
+    note.className = 'collect__note';
+    if (!auto) {
+      note.innerHTML = 'この2サイトはページを開いたときだけ読み取れます。押すと順番を案内します。' +
+        '<a href="/import.html">設定のしかた →</a>';
+    } else if (todo) {
+      note.textContent = '押すと裏で1ページずつ開いて取り込みます（' + todo + 'ページ分、少し時間がかかります）';
+    } else {
+      note.textContent = '取り込み済みです。新しい入荷を見たいときは押すと取り直します。';
+    }
+    box.appendChild(note);
   }
 
   /* ---------------- UIのイベント ---------------- */
