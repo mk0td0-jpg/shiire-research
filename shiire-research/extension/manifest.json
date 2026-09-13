@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "仕入れリサーチ 取り込み",
+  "version": "1.1.0",
+  "description": "セカンドストリート・ブランディアで開いた検索結果の商品を、仕入れリサーチの一覧に取り込みます。",
+  "permissions": ["storage", "tabs"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": { "128": "icon128.png" }
+  },
+  "icons": { "128": "icon128.png" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.2ndstreet.jp/search*",
+        "https://auction.brandear.jp/search/list*"
+      ],
+      "js": ["scrape.js", "collect.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://shiire-research.vercel.app/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
