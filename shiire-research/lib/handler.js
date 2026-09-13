@@ -41,6 +41,7 @@ export async function getConfigPayload() {
       Object.entries(config.categories || {}).map(([k, v]) => [k, v.label || k])
     ),
     categoryDefs: config.categories || {},
+    sizeAliases: config.sizeAliases || {},
   };
 }
 
