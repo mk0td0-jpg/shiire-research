@@ -10,6 +10,7 @@
     "test": "node test/run.js",
     "test:import": "node test/import.mjs",
     "test:ext": "node test/extension.mjs",
+    "test:collect": "node test/collect.mjs",
     "test:ui": "node test/ui.mjs"
   },
   "dependencies": {
