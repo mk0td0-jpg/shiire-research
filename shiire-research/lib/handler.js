@@ -31,6 +31,8 @@ export async function getConfigPayload() {
       color: s.color,
       mode: siteMode(config, s.id),
       reason: siteMode(config, s.id) === 'link' ? siteReason(config, s.id) : null,
+      // 画面側で好きなキーワードの検索URLを組み立てられるようにする（__Q__ を置き換える）
+      searchUrlTemplate: s.searchPageUrl('__Q__'),
     })),
     settings: {
       shippingCost: config.settings.shippingCost,
