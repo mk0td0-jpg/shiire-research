@@ -133,6 +133,43 @@ await app.waitForTimeout(2500);
 const apBrandear = await app.$$eval('.card .badge', (e) => e.map((x) => x.textContent).filter((t) => t === 'ブランディア'));
 ok('別ブランドには混ざらない', apBrandear.length === 0);
 
+// --- 一括取り込みの案内表（拡張機能なし＝iPhone想定） ---
+await app.goto(B + '/', { waitUntil: 'networkidle' });
+await app.waitForSelector('.card');
+await app.waitForTimeout(1200);
+const cLabel = (await app.textContent('#collectBtn')).trim();
+ok('拡張機能なしでもボタンが出る (' + cLabel + ')', /セカスト/.test(cLabel) && /ブランディア/.test(cLabel));
+ok('残り件数が出る', /残り\d+件/.test(cLabel));
+const cNote = await app.textContent('.collect__note');
+ok('ブックマークレットの案内になる', /ページを開いたときだけ/.test(cNote));
+ok('最初は一覧を閉じている', (await app.$$('.collect__item')).length === 0);
+
+await app.click('#collectBtn');
+await app.waitForTimeout(400);
+const cRows = await app.$$eval('.collect__item', (e) => e.length);
+ok('押すと全ブランド分の案内表が開く (' + cRows + '件)', cRows === 10);
+const cOpen = await app.$$eval('.collect__open', (a) => a.map((x) => x.href));
+ok('開くリンクが本物の検索ページを指す',
+  cOpen.some((u) => u.startsWith('https://www.2ndstreet.jp/search?')) &&
+  cOpen.some((u) => u.startsWith('https://auction.brandear.jp/search/list/?')));
+ok('リンクは別タブで開く', (await app.$$eval('.collect__open', (a) => a.every((x) => x.target === '_blank'))));
+
+const rowOf = (t) => app.$$eval('.collect__item', (els, txt) => {
+  const el = els.find((e) => e.querySelector('.collect__txt').textContent.includes(txt));
+  return el ? { done: el.classList.contains('is-done'), mark: el.querySelector('.collect__mark').textContent.trim() } : null;
+}, t);
+
+const antRow = await rowOf('セカスト「アンテプリマ」');
+ok('取り込み済みの行に✓が付く (' + (antRow && antRow.mark) + ')', !!antRow && antRow.done && /✓\s*\d+件/.test(antRow.mark));
+const auRow = await rowOf('セカスト「オーラリー」');
+ok('未取得の行は✓が付かない', !!auRow && !auRow.done && auRow.mark === '');
+const auOpen = await app.$$eval('.collect__item', (els) => {
+  const el = els.find((e) => e.querySelector('.collect__txt').textContent.includes('セカスト「オーラリー」'));
+  const a = el && el.querySelector('.collect__open');
+  return a ? { text: a.textContent.trim(), href: a.href } : null;
+});
+ok('未取得の行には「開く →」が出る', !!auOpen && auOpen.text === '開く →' && /keyword=AURALEE/.test(auOpen.href));
+
 // --- 設定ページ ---
 const help = await ctx.newPage();
 await help.goto(B + '/import.html', { waitUntil: 'networkidle' });
