@@ -503,3 +503,13 @@ button, input, select { font-family: inherit; font-size: 16px; }
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* ---- 端末間で共有 ---- */
+#syncCodeInput {
+  flex: 1 1 auto;
+  min-height: var(--tap);
+  font-size: 15px;
+  letter-spacing: .08em;
+  text-align: center;
+  font-weight: 700;
+}

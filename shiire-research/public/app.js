@@ -12,6 +12,7 @@
     conf: 'sr.settings',
     brands: 'sr.brands',
     imported: 'sr.imported',
+    sync: 'sr.sync',
     last: 'sr.lastBrand'
   };
 
@@ -48,7 +49,7 @@
     filters: { sites: {}, min: '', max: '', sizes: {}, keyword: '' },
     reqToken: 0,
     extCaps: {},           // 拡張機能ができること（open: 裏で1ページずつ開ける）
-    collect: { running: false, manual: false, queue: [], idx: 0, got: 0, currentId: null, timer: null, gapTimer: null }
+    collect: { running: false, open: null, queue: [], idx: 0, got: 0, currentId: null, timer: null, gapTimer: null }
   };
 
   var $ = function (sel) { return document.querySelector(sel); };
@@ -89,8 +90,17 @@
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  function api(path, signal) {
-    return fetch(path, { headers: { accept: 'application/json' }, signal: signal }).then(function (r) {
+  function api(path, opts) {
+    var init = { headers: { accept: 'application/json' } };
+    if (opts) {
+      if (opts.method) init.method = opts.method;
+      if (opts.body) init.body = opts.body;
+      if (opts.signal) init.signal = opts.signal;
+      if (opts.headers) {
+        Object.keys(opts.headers).forEach(function (k) { init.headers[k] = opts.headers[k]; });
+      }
+    }
+    return fetch(path, init).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
@@ -119,6 +129,7 @@
     bindUi();
     registerSW();
     setupImport();
+    setupSync();
     api('/api/config').then(function (cfg) {
       state.server = cfg;
       if (settings.shipping == null) settings.shipping = cfg.settings.shippingCost;
@@ -929,6 +940,7 @@
       var got = decodeHashImport(location.hash);
       if (!got) return null;
       var n = acceptImport(got.siteId, got.keyword, got.at, got.items);
+      if (n) syncPushSoon();
       history.replaceState(null, '', location.pathname + location.search);
       return n ? got : null;
     } catch (e) {
@@ -978,6 +990,7 @@
           changed += acceptImport(siteId, entry.keyword || k, entry.at, entry.items);
         });
       });
+      if (changed) syncPushSoon();
       if (changed && state.server) refreshImported();
       else if (state.server) renderCollect();
     });
@@ -1004,12 +1017,14 @@
     return (imported[siteId] || {})[normKey(keyword)] || null;
   }
 
-  // 取り込むべき「ブランド × サイト」の一覧を作る。all=false なら未取得と古いものだけ。
-  function collectTargets(all) {
+  // 取り込むべき「ブランド × サイト」の一覧を作る。
+  // all=false なら未取得と古いものだけ。brandId を渡すとそのブランドだけ。
+  function collectTargets(all, brandId) {
     var out = [];
     var sites = linkSites();
     if (!sites.length) return out;
     state.brands.forEach(function (b) {
+      if (brandId && b.id !== brandId) return;
       var keyword = (b.keywords || []).filter(Boolean)[0];
       if (!keyword) return;
       sites.forEach(function (s) {
@@ -1037,10 +1052,10 @@
   }
 
   /* --- 拡張機能に頼んで1ページずつ自動で取り込む --- */
-  function startCollect(all) {
+  function startCollect(all, brandId) {
     var c = state.collect;
     if (c.running) return;
-    var queue = collectTargets(all);
+    var queue = collectTargets(all, brandId);
     if (!queue.length) { toast('取り込み済みです'); return; }
     c.running = true; c.queue = queue; c.idx = 0; c.got = 0;
     c.currentId = null; c.timer = null; c.gapTimer = null;
@@ -1093,6 +1108,7 @@
     c.running = false; c.currentId = null;
     clearTimeout(c.timer); clearTimeout(c.gapTimer);
     refreshImported();
+    syncPushSoon();
     toast(pages + 'ページから ' + got + '件 取り込みました');
   }
 
@@ -1117,44 +1133,28 @@
 
     var c = state.collect;
     var auto = !!state.extCaps.open;
-    var todo = collectTargets(false).length;
+    var brand = currentBrand();
     var names = sites.map(function (s) { return s.short; }).join('・');
+
+    var todoBrand = brand ? collectTargets(false, brand.id).length : 0;
+    var allBrand = brand ? collectTargets(true, brand.id).length : 0;
+    var todoAll = collectTargets(false).length;
+    var allAll = collectTargets(true).length;
 
     var bar = document.createElement('div');
     bar.className = 'collect__bar';
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.id = 'collectBtn';
-    btn.className = 'collect__btn';
 
+    // 取り込み中は進み具合と中止だけ
     if (c.running) {
-      btn.classList.add('is-running');
-      btn.innerHTML = '<span class="collect__spin"></span>取り込み中 ' + (c.idx + 1) + '/' + c.queue.length + '（押すと中止）';
-      btn.addEventListener('click', stopCollect);
-    } else if (auto) {
-      btn.textContent = todo ? '📥 ' + names + 'を取り込む（' + todo + '件）' : '📥 ' + names + 'を取り直す';
-      btn.addEventListener('click', function () { startCollect(todo === 0); });
-    } else {
-      btn.textContent = todo
-        ? '📥 ' + names + 'を取り込む（残り' + todo + '件）'
-        : '📥 ' + names + 'の取り込み状況';
-      btn.classList.toggle('is-open', !!c.open);
-      btn.addEventListener('click', function () { c.open = !c.open; renderCollect(); });
-    }
-    bar.appendChild(btn);
+      var stop = document.createElement('button');
+      stop.type = 'button';
+      stop.id = 'collectBtn';
+      stop.className = 'collect__btn is-running';
+      stop.innerHTML = '<span class="collect__spin"></span>取り込み中 ' + (c.idx + 1) + '/' + c.queue.length + '（押すと中止）';
+      stop.addEventListener('click', stopCollect);
+      bar.appendChild(stop);
+      box.appendChild(bar);
 
-    if (auto && !c.running && todo) {
-      var again = document.createElement('button');
-      again.type = 'button';
-      again.className = 'collect__sub';
-      again.textContent = '全部取り直す';
-      again.addEventListener('click', function () { startCollect(true); });
-      bar.appendChild(again);
-    }
-    box.appendChild(bar);
-
-    // 自動で動いている間の進み具合
-    if (c.running) {
       var list = document.createElement('ol');
       list.className = 'collect__list';
       c.queue.forEach(function (t, i) {
@@ -1166,12 +1166,52 @@
       return;
     }
 
+    // ボタンを作る。scope は 'brand'（今のブランドだけ）か 'all'（全ブランド）。
+    function makeBtn(scope, primary) {
+      var isBrand = scope === 'brand';
+      var todo = isBrand ? todoBrand : todoAll;
+      var total = isBrand ? allBrand : allAll;
+      if (!total) return null;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = primary ? 'collect__btn' : 'collect__sub';
+      if (primary) b.id = 'collectBtn'; else b.id = 'collectSubBtn';
+      var label = isBrand ? (brand ? brand.label : '') : '全ブランド';
+      if (primary) {
+        b.textContent = todo
+          ? '📥 ' + label + 'を取り込む（' + todo + '件）'
+          : '📥 ' + label + 'を取り直す';
+      } else {
+        b.textContent = todo ? label + '（' + todo + '件）' : label + 'を取り直す';
+      }
+      if (!auto && c.open === scope) b.classList.add('is-open');
+      b.addEventListener('click', function () {
+        if (auto) { startCollect(todo === 0, isBrand ? brand.id : null); return; }
+        c.open = (c.open === scope) ? null : scope;
+        renderCollect();
+      });
+      return b;
+    }
+
+    // スマホ（拡張機能なし）は「このブランドだけ」を主役にする
+    var order = auto ? ['all', 'brand'] : ['brand', 'all'];
+    var main = makeBtn(order[0], true) || makeBtn(order[1], true);
+    var sub = null;
+    if (main && main.id === 'collectBtn') {
+      var other = (main.textContent.indexOf('全ブランド') >= 0) ? 'brand' : 'all';
+      sub = makeBtn(other, false);
+    }
+    if (main) bar.appendChild(main);
+    if (sub) bar.appendChild(sub);
+    box.appendChild(bar);
+
     // 拡張機能が無いときの案内表（開いたときだけ）
     if (!auto && c.open) {
-      var all = collectTargets(true);
+      var scopeBrandId = c.open === 'brand' && brand ? brand.id : null;
+      var rows = collectTargets(true, scopeBrandId);
       var ol = document.createElement('ol');
       ol.className = 'collect__list';
-      all.forEach(function (t) {
+      rows.forEach(function (t) {
         var mode = t.fresh ? 'done' : 'wait';
         var li = collectItemRow(t, mode, t.fresh ? '✓ ' + t.n + '件' : '');
         if (!t.fresh) {
@@ -1197,14 +1237,133 @@
     var note = document.createElement('p');
     note.className = 'collect__note';
     if (!auto) {
-      note.innerHTML = 'この2サイトはページを開いたときだけ読み取れます。押すと順番を案内します。' +
-        '<a href="/import.html">設定のしかた →</a>';
-    } else if (todo) {
-      note.textContent = '押すと裏で1ページずつ開いて取り込みます（' + todo + 'ページ分、少し時間がかかります）';
+      note.innerHTML = 'この2サイト（' + esc(names) + '）はページを開いたときだけ読み取れます。' +
+        '見たいブランドだけ押せば2ページで済みます。<a href="/import.html">設定のしかた →</a>';
+    } else if (todoAll) {
+      note.textContent = '押すと裏で1ページずつ開いて取り込みます（全ブランドで' + todoAll + 'ページ、少し時間がかかります）';
     } else {
       note.textContent = '取り込み済みです。新しい入荷を見たいときは押すと取り直します。';
     }
     box.appendChild(note);
+  }
+
+  /* ---------------- 端末間で共有（同期コード） ---------------- */
+  // 同じ同期コードを入れた端末どうしで、取り込んだ商品だけを共有する。
+  // 送るのは商品情報だけ。Cookieやログイン情報は扱わない。
+  var syncBusy = false;
+  var syncTimer = null;
+
+  function syncCode() {
+    var v = load(K.sync, {}) || {};
+    return typeof v.code === 'string' ? v.code : '';
+  }
+
+  function setSyncCode(code) {
+    save(K.sync, { code: code || '' });
+  }
+
+  function makeSyncCode() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 紛らわしい文字は使わない
+    var out = '';
+    var buf = new Uint8Array(10);
+    (window.crypto || {}).getRandomValues
+      ? window.crypto.getRandomValues(buf)
+      : buf.forEach(function (_, i) { buf[i] = Math.floor(Math.random() * 256); });
+    for (var i = 0; i < buf.length; i++) out += chars[buf[i] % chars.length];
+    return out;
+  }
+
+  // サーバーから受け取った内容を、この端末の取り込みに混ぜる（新しいほうを残す）
+  function adoptShared(remote) {
+    var changed = 0;
+    Object.keys(remote || {}).forEach(function (siteId) {
+      var site = remote[siteId] || {};
+      Object.keys(site).forEach(function (k) {
+        var e = site[k];
+        if (!e || !e.items || !e.items.length) return;
+        var cur = (imported[siteId] || {})[k];
+        if (cur && new Date(cur.at) >= new Date(e.at)) return;
+        if (!imported[siteId]) imported[siteId] = {};
+        imported[siteId][k] = { keyword: e.keyword || k, at: e.at, items: e.items };
+        changed += e.items.length;
+      });
+    });
+    if (changed) saveImported();
+    return changed;
+  }
+
+  function setSyncState(text) {
+    var el = $('#syncState');
+    if (el) el.textContent = text || '';
+  }
+
+  // push=true なら送ってから受け取る（結果はサーバーで混ぜたもの）
+  function syncRun(push, quiet) {
+    var code = syncCode();
+    if (!code || syncBusy) return Promise.resolve(null);
+    syncBusy = true;
+    if (!quiet) setSyncState('同期中…');
+    var url = '/api/share?code=' + encodeURIComponent(code);
+    var req = push
+      ? api(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ imported: imported }) })
+      : api(url);
+    return req.then(function (data) {
+      syncBusy = false;
+      if (!data || data.enabled === false) {
+        setSyncState('共有の保存先がまだ設定されていません。');
+        return null;
+      }
+      var got = adoptShared(data.imported);
+      setSyncState('同期しました（' + data.count + '件）');
+      if (got && state.server) refreshImported();
+      return data;
+    }).catch(function (e) {
+      syncBusy = false;
+      setSyncState('同期できませんでした（' + e.message + '）');
+      if (!quiet) toast('同期できませんでした');
+      return null;
+    });
+  }
+
+  // 取り込みのあとに、少し待ってからまとめて送る
+  function syncPushSoon() {
+    if (!syncCode()) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { syncRun(true, true); }, 1500);
+  }
+
+  function setupSync() {
+    var input = $('#syncCodeInput');
+    if (input) input.value = syncCode();
+
+    var make = $('#syncMakeBtn');
+    if (make) make.addEventListener('click', function () {
+      var c = makeSyncCode();
+      $('#syncCodeInput').value = c;
+      setSyncCode(c);
+      setSyncState('コードを作りました。もう一方の端末にも同じコードを入れてください。');
+      syncRun(true);
+    });
+
+    var saveBtn = $('#syncSaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', function () {
+      var v = String($('#syncCodeInput').value || '').trim().toUpperCase();
+      $('#syncCodeInput').value = v;
+      if (v && !/^[A-Z0-9]{6,32}$/.test(v)) { toast('コードは英数字6文字以上です'); return; }
+      setSyncCode(v);
+      if (!v) { setSyncState('共有をやめました。'); return; }
+      setSyncState('保存しました。');
+      syncRun(true);
+    });
+
+    var now = $('#syncNowBtn');
+    if (now) now.addEventListener('click', function () {
+      if (!syncCode()) { toast('先に同期コードを入れてください'); return; }
+      syncRun(true);
+    });
+
+    // 画面を開いたときに受け取る
+    if (syncCode()) setTimeout(function () { syncRun(false, true); }, 1200);
   }
 
   /* ---------------- UIのイベント ---------------- */

@@ -91,6 +91,18 @@
   <p class="settings__note">この2サイトはサーバーから取得できないため、まきさんのブラウザで開いた検索結果を取り込みます。</p>
   <a class="btn btn--block" href="/import.html">取り込みの設定を開く</a>
 
+  <h2 class="settings__h">端末間で共有</h2>
+  <p class="settings__note">同じ同期コードを入れた端末どうしで、取り込んだ商品を共有します。PCで取り込めばiPhoneでも同じ一覧が見られます。<br>送るのは商品情報だけで、Cookieやログイン情報は一切送りません。</p>
+  <div class="settings__btns">
+    <input id="syncCodeInput" class="input" type="text" inputmode="latin" autocapitalize="characters" spellcheck="false" placeholder="同期コード" maxlength="32">
+    <button id="syncMakeBtn" class="btn btn--block" type="button">コードを作る</button>
+  </div>
+  <div class="settings__btns">
+    <button id="syncSaveBtn" class="btn btn--block" type="button">保存</button>
+    <button id="syncNowBtn" class="btn btn--block" type="button">今すぐ同期</button>
+  </div>
+  <p id="syncState" class="settings__note"></p>
+
   <h2 class="settings__h">設定の引っ越し</h2>
   <p class="settings__note">PCとiPhoneで同じ設定にしたいときは、下の文字をコピーして、もう一方の端末に貼り付けて「読み込む」を押してください。</p>
   <textarea id="settingsIO" class="settings__io" spellcheck="false"></textarea>
