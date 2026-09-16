@@ -59,37 +59,33 @@ async function kvSet(key, value) {
   if (!res.ok) throw new Error(`保存できませんでした (${res.status})`);
 }
 
-function blobUrl(key) {
-  return `https://blob.vercel-storage.com/${encodeURIComponent(key)}`;
-}
-
+// Vercel Blob は公式の SDK を使う（読み書きは非公開設定）
 async function blobGet(key) {
-  const head = await fetch(blobUrl(key), {
-    method: 'HEAD',
-    headers: { authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`, 'x-api-version': '7' },
+  const { get } = await import('@vercel/blob');
+  const res = await get(key, { access: 'private', useCache: false }).catch((e) => {
+    if (e && /not ?found/i.test(String(e.name) + String(e.message))) return null;
+    throw e;
   });
-  if (head.status === 404) return null;
-  const res = await fetch(blobUrl(key), {
-    headers: { authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`, 'x-api-version': '7' },
-    cache: 'no-store',
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`保存先から読み取れませんでした (${res.status})`);
-  return res.text();
+  if (!res || res.statusCode !== 200 || !res.stream) return null;
+  const reader = res.stream.getReader();
+  const parts = [];
+  for (;;) {
+    const r = await reader.read();
+    if (r.done) break;
+    parts.push(Buffer.from(r.value));
+  }
+  return Buffer.concat(parts).toString('utf8');
 }
 
 async function blobSet(key, value) {
-  const res = await fetch(blobUrl(key), {
-    method: 'PUT',
-    headers: {
-      authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
-      'x-api-version': '7',
-      'x-add-random-suffix': '0',
-      'content-type': 'text/plain',
-    },
-    body: value,
+  const { put } = await import('@vercel/blob');
+  await put(key, value, {
+    access: 'private',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: 'text/plain',
+    cacheControlMaxAge: 60,
   });
-  if (!res.ok) throw new Error(`保存できませんでした (${res.status})`);
 }
 
 async function rawGet(key) {
@@ -215,7 +211,7 @@ export function countItems(data) {
 export async function readShared(code) {
   if (!codeIsValid(code)) throw Object.assign(new Error('同期コードの形式が違います'), { status: 400 });
   if (!shareEnabled()) return { enabled: false, imported: {}, at: null, count: 0 };
-  const saved = unpack(await rawGet(`shiire:${code}`));
+  const saved = unpack(await rawGet(`shiire/${code}.txt`));
   const imported = (saved && saved.imported) || {};
   return {
     enabled: true,
@@ -230,7 +226,7 @@ export async function writeShared(code, incoming) {
   if (!shareEnabled()) return { enabled: false, imported: {}, at: null, count: 0 };
 
   const clean = sanitize(incoming);
-  const saved = unpack(await rawGet(`shiire:${code}`));
+  const saved = unpack(await rawGet(`shiire/${code}.txt`));
   const merged = merge((saved && saved.imported) || {}, clean);
 
   const payload = { v: 1, at: new Date().toISOString(), imported: merged };
@@ -238,6 +234,6 @@ export async function writeShared(code, incoming) {
   if (Buffer.byteLength(json, 'utf8') > MAX_BYTES) {
     throw Object.assign(new Error('取り込んだ商品が多すぎます'), { status: 413 });
   }
-  await rawSet(`shiire:${code}`, pack(payload));
+  await rawSet(`shiire/${code}.txt`, pack(payload));
   return { enabled: true, imported: merged, at: payload.at, count: countItems(merged) };
 }
