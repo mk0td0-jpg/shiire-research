@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { getConfigPayload, getProducts } from './lib/handler.js';
+import { readShared, writeShared, shareEnabled, storeKind } from './lib/share.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('./public/', import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -42,6 +43,21 @@ const server = http.createServer(async (req, res) => {
         refresh,
       });
       return json(res, 200, data, refresh ? 'no-store' : 's-maxage=1500, stale-while-revalidate=3600');
+    }
+
+    if (url.pathname === '/api/share') {
+      const code = url.searchParams.get('code');
+      if (req.method === 'GET' && !code) {
+        return json(res, 200, { enabled: shareEnabled(), store: storeKind() });
+      }
+      if (req.method === 'GET') return json(res, 200, await readShared(code));
+      if (req.method === 'POST') {
+        const chunks = [];
+        for await (const c of req) chunks.push(c);
+        const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+        return json(res, 200, await writeShared(code, body && body.imported));
+      }
+      return json(res, 405, { error: '使えない方法です' });
     }
 
     let rel = decodeURIComponent(url.pathname);

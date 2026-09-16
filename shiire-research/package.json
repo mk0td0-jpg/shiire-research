@@ -11,9 +11,11 @@
     "test:import": "node test/import.mjs",
     "test:ext": "node test/extension.mjs",
     "test:collect": "node test/collect.mjs",
-    "test:ui": "node test/ui.mjs"
+    "test:ui": "node test/ui.mjs",
+    "test:sync": "node test/sync.mjs"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "cheerio": "1.0.0"
   },
   "engines": {
