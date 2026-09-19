@@ -1,7 +1,7 @@
 // ホーム画面に追加したときのための仕組み。
 // 画面ファイルは「まず通信、だめならキャッシュ」。更新がすぐ反映されるようにしている。
-const CACHE = 'shiire-v5';
-const SHELL = ['/', '/index.html', '/styles.css?v=4', '/app.js?v=4', '/icon.svg', '/manifest.webmanifest'];
+const CACHE = 'shiire-v6';
+const SHELL = ['/', '/index.html', '/styles.css?v=6', '/app.js?v=6', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
