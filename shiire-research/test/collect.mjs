@@ -61,14 +61,22 @@ const ctx = await chromium.launchPersistentContext(userDataDir, {
 const app = await ctx.newPage();
 const errs = [];
 app.on('pageerror', (e) => { if (!/ServiceWorker/.test(e.message)) errs.push('PAGEERROR: ' + e.message); });
+// まずは手動ボタンを確かめたいので、自動取り込みは切っておく
+await app.addInitScript(() => {
+  try {
+    if (!localStorage.getItem('sr.auto')) localStorage.setItem('sr.auto', JSON.stringify({ on: false }));
+  } catch (e) {}
+});
 await app.goto('https://shiire-research.vercel.app/');
 await app.waitForSelector('.card', { timeout: 25000 });
 await app.waitForTimeout(2500);
 
 // --- ボタンの見た目 ---
 const label0 = (await app.textContent('#collectBtn')).trim();
-ok('一括取り込みボタンが出る (' + label0 + ')', /セカスト/.test(label0) && /ブランディア/.test(label0));
+ok('拡張機能ありなら全ブランドが主役 (' + label0 + ')', /全ブランド/.test(label0));
 ok('残り件数が出る', /（\d+件）/.test(label0));
+const sub0 = (await app.textContent('#collectSubBtn')).trim();
+ok('このブランドだけのボタンも並ぶ (' + sub0 + ')', sub0.length > 0 && !/全ブランド/.test(sub0));
 const note = await app.textContent('.collect__note');
 ok('拡張機能ありの案内になる', /裏で1ページずつ/.test(note));
 
@@ -104,8 +112,72 @@ ok('ブランディアが保存された', Object.keys(store.brandear || {}).len
 const label1 = (await app.textContent('#collectBtn')).trim();
 ok('取り込み済みなら「取り直す」になる (' + label1 + ')', /取り直す/.test(label1));
 
+// --- ブランドを絞って取り込める ---
+const brandBtnLabel = (await app.textContent('#collectSubBtn')).trim();
+ok('ブランドを絞るボタンが使える (' + brandBtnLabel + ')', brandBtnLabel.length > 0);
+const before = opened.length;
+await app.click('#collectSubBtn');
+await app.waitForTimeout(1200);
+const runLabel = (await app.textContent('#collectBtn')).trim();
+ok('絞ったときは2ページだけ (' + runLabel + ')', /取り込み中\s*\d+\/2/.test(runLabel));
+await app.waitForFunction(
+  () => !/取り込み中/.test(document.querySelector('#collectBtn').textContent),
+  null, { timeout: 60000 }
+);
+await app.waitForTimeout(1000);
+ok('開いたのは2ページだけ (' + (opened.length - before) + 'ページ)', opened.length - before === 2);
+
 const left = ctx.pages().filter((p) => /2ndstreet|brandear/.test(p.url()));
 ok('取り込みに使ったタブは閉じられる', left.length === 0);
+
+// --- 自動取り込み（ボタンを押さなくても始まる） ---
+const wipe = async (auto) => {
+  await app.evaluate(() => new Promise((r) => {
+    window.postMessage({ source: 'shiire-page', type: 'clear' }, location.origin); // 拡張機能の中身も空に
+    setTimeout(r, 1500);
+  }));
+  await app.evaluate((on) => {
+    localStorage.setItem('sr.auto', JSON.stringify({ on: on }));
+    localStorage.removeItem('sr.imported');
+  }, auto);
+};
+
+const beforeAuto = opened.length;
+await wipe(true);
+await app.reload({ waitUntil: 'load' });
+await app.waitForSelector('.card', { timeout: 25000 });
+await app.waitForFunction(
+  () => /取り込み中/.test((document.querySelector('#collectBtn') || {}).textContent || ''),
+  null, { timeout: 20000 }
+).then(() => ok('開いただけで自動的に取り込みが始まる', true))
+ .catch(() => ok('開いただけで自動的に取り込みが始まる', false));
+
+const autoLabel = (await app.textContent('#collectBtn')).trim();
+ok('自動だと分かる表示 (' + autoLabel + ')', /自動取り込み中/.test(autoLabel));
+
+await app.waitForFunction(
+  () => !/取り込み中/.test(document.querySelector('#collectBtn').textContent),
+  null, { timeout: 180000 }
+);
+await app.waitForTimeout(1200);
+ok('自動でも10ページ開く (' + (opened.length - beforeAuto) + 'ページ)', opened.length - beforeAuto === 10);
+
+// 直後にもう一度開いても、続けざまには取り込まない
+const beforeAgain = opened.length;
+await app.reload({ waitUntil: 'load' });
+await app.waitForSelector('.card', { timeout: 25000 });
+await app.waitForTimeout(5000);
+ok('続けて開いても取り込み直さない', opened.length === beforeAgain);
+
+// 設定で切れる
+await wipe(false);
+await app.reload({ waitUntil: 'load' });
+await app.waitForSelector('.card', { timeout: 25000 });
+await app.waitForTimeout(5000);
+ok('設定を切ると自動では取り込まない', opened.length === beforeAgain);
+ok('切ったあとは取り込み待ちが残る', /（\d+件）/.test((await app.textContent('#collectBtn')).trim()));
+const offNote = await app.textContent('.collect__note');
+ok('切ったときの案内文になる', /押すと裏で1ページずつ/.test(offNote));
 
 console.log(R.join('\n'));
 console.log('\nJSエラー:', errs.length ? errs.join('\n') : 'なし');

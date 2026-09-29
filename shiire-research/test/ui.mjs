@@ -98,9 +98,37 @@ const expect = (30000 - buy - 3000 - 850).toLocaleString('ja-JP');
 ok('予想利益の自動計算', (await p.textContent('.profit')).includes(expect));
 await p.click('.viewBtn[data-view="all"]'); await p.waitForTimeout(250);
 
+// 相場を調べるボタン（Googleレンズ・メルカリ）
+const look = await p.evaluate(() => {
+  const c = document.querySelector('.card');
+  const a = [...c.querySelectorAll('.card__lookup .lookBtn')];
+  return {
+    n: a.length,
+    hrefs: a.map((x) => x.href),
+    texts: a.map((x) => x.textContent.trim()),
+    target: a.every((x) => x.target === '_blank' && /noopener/.test(x.rel)),
+    h: a.length ? Math.min(...a.map((x) => x.getBoundingClientRect().height)) : 0,
+    img: (c.querySelector('.card__img') || {}).src || '',
+    brand: c.querySelector('.card__brand').textContent.trim()
+  };
+});
+ok('カードに調べるボタンが出る (' + look.texts.join('/') + ')', look.n >= 1);
+ok('画像が使えないときは名前での画像検索になる',
+  !look.img.startsWith('data:') ||
+  (look.hrefs.some((h) => h.startsWith('https://www.google.com/search?udm=2&q=')) &&
+   !look.hrefs.some((h) => h.startsWith('https://lens.google.com/'))));
+ok('メルカリは売り切れを探す',
+  look.hrefs.some((h) => h.startsWith('https://jp.mercari.com/search?') && /status=sold_out/.test(h)));
+ok('メルカリの検索語にブランド名が入る',
+  look.hrefs.some((h) => h.includes(encodeURIComponent(look.brand.split(' ')[0]))));
+ok('別タブで安全に開く', look.target);
+ok('調べるボタンも押しやすい', look.h >= 30);
+
 // 設定：送料・手数料
 await p.click('#settingsBtn'); await p.waitForTimeout(400);
 ok('設定画面が開く', await p.isVisible('#shippingInput'));
+ok('自動取り込みの設定がある', await p.isVisible('#autoCollectInput'));
+ok('自動取り込みは最初からオン', await p.isChecked('#autoCollectInput'));
 await p.fill('#shippingInput','1200'); await p.waitForTimeout(300);
 await p.click('.viewBtn[data-view="cand"]'); await p.waitForTimeout(400);
 const expect2 = (30000 - buy - 3000 - 1200).toLocaleString('ja-JP');
@@ -115,12 +143,15 @@ const newCard = (await p.$$('.bcard'))[5];
 await newCard.$eval('[data-f="label"]', el=>{el.value='テストブランド'; el.dispatchEvent(new Event('change',{bubbles:true}))});
 await p.waitForTimeout(400);
 ok('表示名の変更が反映', (await p.$$eval('.brandBtn span', e=>e.map(x=>x.textContent))).includes('テストブランド'));
+// 対象サイトの切替
 const chips = await (await p.$$('.bcard'))[5].$$('[data-f="sites"] .chip');
 await chips[0].click(); await p.waitForTimeout(300);
 ok('対象サイトを外せる', !(await chips[0].getAttribute('class')).includes('is-on'));
+// 書き出し／読み込み
 await p.click('#exportBtn'); await p.waitForTimeout(200);
 const io = await p.inputValue('#settingsIO');
 ok('設定を書き出せる', io.includes('テストブランド'));
+// 削除して元に戻す
 await (await p.$$('.bcard'))[5].$eval('.bcard__del', el=>el.click());
 await p.waitForTimeout(400);
 ok('ブランドを削除できる', (await p.$$('.bcard')).length===5);

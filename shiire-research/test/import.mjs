@@ -108,6 +108,35 @@ ok('取り込み商品の価格', imported.length === 1 && imported[0].price.inc
 const href = await app.$eval('.card .badge', (b) => b.closest('.card').querySelector('.card__link').href);
 ok('取り込み商品のリンクが元サイト', href.startsWith('https://www.2ndstreet.jp/goods/detail/'));
 
+// 相場を調べるボタン（Googleレンズ・メルカリ）
+const look = await app.evaluate(() => {
+  const c = [...document.querySelectorAll('.card')]
+    .find((x) => (x.querySelector('.badge') || {}).textContent === 'セカスト');
+  const a = [...c.querySelectorAll('.card__lookup .lookBtn')];
+  return { hrefs: a.map((x) => x.href), img: c.querySelector('.card__img').src };
+});
+ok('セカストはレンズが使えないので名前で画像検索',
+  look.hrefs.some((h) => h.startsWith('https://www.google.com/search?udm=2&q=')) &&
+  !look.hrefs.some((h) => h.startsWith('https://lens.google.com/')));
+ok('メルカリの売り切れを探す',
+  look.hrefs.some((h) => h.startsWith('https://jp.mercari.com/search?') && /status=sold_out/.test(h)));
+const lookBe = await app.evaluate(() => {
+  const c = [...document.querySelectorAll('.card')]
+    .find((x) => (x.querySelector('.badge') || {}).textContent === 'ブランディア');
+  if (!c) return null;
+  return {
+    hrefs: [...c.querySelectorAll('.card__lookup .lookBtn')].map((x) => x.href),
+    img: (c.querySelector('.card__img') || {}).src || ''
+  };
+});
+ok('ブランディアはGoogleレンズに画像URLを渡す',
+  !lookBe || lookBe.hrefs.some((h) => h === 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(lookBe.img)));
+ok('メルカリの検索語はブランド＋商品名（型番やサイズは外す）',
+  look.hrefs.some((h) => {
+    const q = decodeURIComponent((h.match(/keyword=([^&]*)/) || [])[1] || '');
+    return q.includes('ANTEPRIMA') && q.includes('ワイヤーバッグ') && !q.includes('/');
+  }));
+
 // --- リロードしても残る ---
 await app.reload({ waitUntil: 'networkidle' });
 await app.waitForSelector('.card');
@@ -137,17 +166,31 @@ ok('別ブランドには混ざらない', apBrandear.length === 0);
 await app.goto(B + '/', { waitUntil: 'networkidle' });
 await app.waitForSelector('.card');
 await app.waitForTimeout(1200);
+
+const curBrand = await app.$eval('.brandBtn.is-active', (e) => e.textContent.trim());
 const cLabel = (await app.textContent('#collectBtn')).trim();
-ok('拡張機能なしでもボタンが出る (' + cLabel + ')', /セカスト/.test(cLabel) && /ブランディア/.test(cLabel));
-ok('残り件数が出る', /残り\d+件/.test(cLabel));
+ok('主役は「今のブランドだけ」のボタン (' + cLabel + ')', cLabel.includes(curBrand.replace(/全商品|バッグのみ|L以上/g, '').trim()) || /アンテプリマ/.test(cLabel));
+ok('件数が出る', /（\d+件）/.test(cLabel) || /取り直す/.test(cLabel));
+const subLabel = (await app.textContent('#collectSubBtn')).trim();
+ok('全ブランドのボタンも並ぶ (' + subLabel + ')', /全ブランド/.test(subLabel));
 const cNote = await app.textContent('.collect__note');
 ok('ブックマークレットの案内になる', /ページを開いたときだけ/.test(cNote));
+ok('見たいブランドだけで済むと書いてある', /2ページで済み/.test(cNote));
 ok('最初は一覧を閉じている', (await app.$$('.collect__item')).length === 0);
 
+// このブランドだけ → 2ページ（セカスト・ブランディア）
 await app.click('#collectBtn');
 await app.waitForTimeout(400);
-const cRows = await app.$$eval('.collect__item', (e) => e.length);
-ok('押すと全ブランド分の案内表が開く (' + cRows + '件)', cRows === 10);
+const brandRows = await app.$$eval('.collect__item', (e) => e.map((x) => x.querySelector('.collect__txt').textContent));
+ok('このブランドだけなら2ページ (' + brandRows.length + '件)', brandRows.length === 2);
+ok('2ページとも同じブランド', brandRows.every((t) => t === brandRows[0].replace(/^[^「]*/, brandRows[0].split('「')[0]) || t.split('「')[1] === brandRows[0].split('「')[1]));
+
+// 全ブランド → 10ページ
+await app.click('#collectSubBtn');
+await app.waitForTimeout(400);
+const allRows = await app.$$eval('.collect__item', (e) => e.length);
+ok('全ブランドなら10ページ (' + allRows + '件)', allRows === 10);
+
 const cOpen = await app.$$eval('.collect__open', (a) => a.map((x) => x.href));
 ok('開くリンクが本物の検索ページを指す',
   cOpen.some((u) => u.startsWith('https://www.2ndstreet.jp/search?')) &&
@@ -169,6 +212,11 @@ const auOpen = await app.$$eval('.collect__item', (els) => {
   return a ? { text: a.textContent.trim(), href: a.href } : null;
 });
 ok('未取得の行には「開く →」が出る', !!auOpen && auOpen.text === '開く →' && /keyword=AURALEE/.test(auOpen.href));
+
+// もう一度押すと閉じる
+await app.click('#collectSubBtn');
+await app.waitForTimeout(300);
+ok('もう一度押すと閉じる', (await app.$$('.collect__item')).length === 0);
 
 // --- 設定ページ ---
 const help = await ctx.newPage();
