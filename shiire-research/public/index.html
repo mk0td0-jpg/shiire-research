@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="仕入れリサーチ">
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=6">
+<link rel="stylesheet" href="/styles.css?v=7">
 </head>
 <body>
 <header class="topbar">
@@ -89,6 +89,11 @@
 
   <h2 class="settings__h">セカスト・ブランディアの取り込み</h2>
   <p class="settings__note">この2サイトはサーバーから取得できないため、まきさんのブラウザで開いた検索結果を取り込みます。</p>
+  <label class="settings__check">
+    <input id="autoCollectInput" type="checkbox">
+    <span>この画面を開いたら自動で取り込む</span>
+  </label>
+  <p class="settings__note">Chrome拡張機能を入れたパソコンだけで動きます。古くなったものだけを、裏で1ページずつ静かに取り込みます。</p>
   <a class="btn btn--block" href="/import.html">取り込みの設定を開く</a>
 
   <h2 class="settings__h">端末間で共有</h2>
@@ -119,6 +124,6 @@
 <div id="notices" class="notices"></div>
 
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=6"></script>
+<script src="/app.js?v=7"></script>
 </body>
 </html>

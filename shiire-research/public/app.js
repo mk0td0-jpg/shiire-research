@@ -13,6 +13,7 @@
     brands: 'sr.brands',
     imported: 'sr.imported',
     sync: 'sr.sync',
+    auto: 'sr.auto',
     last: 'sr.lastBrand'
   };
 
@@ -49,7 +50,7 @@
     filters: { sites: {}, min: '', max: '', sizes: {}, keyword: '' },
     reqToken: 0,
     extCaps: {},           // 拡張機能ができること（open: 裏で1ページずつ開ける）
-    collect: { running: false, open: null, queue: [], idx: 0, got: 0, currentId: null, timer: null, gapTimer: null }
+    collect: { running: false, open: null, queue: [], idx: 0, got: 0, quiet: false, currentId: null, timer: null, gapTimer: null }
   };
 
   var $ = function (sel) { return document.querySelector(sel); };
@@ -160,6 +161,8 @@
       }
       state.pendingImport = null;
       setInterval(renderStatusBar, 30000);
+      clearTimeout(autoTimer);
+      autoTimer = setTimeout(maybeAutoCollect, 1500);
     }).catch(function (e) {
       grid.innerHTML = '';
       showEmpty('設定の読み込みに失敗しました（' + e.message + '）');
@@ -560,6 +563,60 @@
     save(K.snap, snapshots);
   }
 
+  /* --- 相場を調べる（Googleレンズ／メルカリ） --- */
+  // 画像そのものは送りません。画像のURLをGoogleレンズに渡して、同じ写真の商品を探します。
+  // セカストの画像はサイト側が外部からの取得を断るため、レンズでは開けません。
+  // その場合はブランド名＋商品名でのGoogle画像検索にします。
+  var LENS_NG = /(^|\.)2ndstreet\.jp$/;
+
+  function searchWords(item) {
+    var name = String(item.name || '')
+      .replace(/【[^】]*】/g, ' ')
+      .split('/')[0]
+      .replace(/[（(][^）)]*[）)]/g, ' ');
+    return (String(item.brand || '') + ' ' + name).replace(/\s+/g, ' ').trim();
+  }
+
+  function lensUrl(item) {
+    if (!item.image || !/^https:\/\//.test(item.image)) return '';
+    try { if (LENS_NG.test(new URL(item.image).hostname)) return ''; } catch (e) { return ''; }
+    return 'https://lens.google.com/uploadbyurl?url=' + encodeURIComponent(item.image);
+  }
+
+  function imageSearchUrl(item) {
+    var q = searchWords(item);
+    return q ? 'https://www.google.com/search?udm=2&q=' + encodeURIComponent(q) : '';
+  }
+
+  // ブランド名＋商品名で、メルカリの「売り切れ（＝実際に売れた値段）」を探します。
+  function mercariUrl(item) {
+    var q = searchWords(item);
+    if (!q) return '';
+    return 'https://jp.mercari.com/search?keyword=' + encodeURIComponent(q) +
+      '&status=sold_out&order=desc&sort=created_time';
+  }
+
+  function lookBtnHtml(url, label) {
+    return '<a class="lookBtn" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="lookBtn__i">\uD83D\uDD0D</span>' + label + '</a>';
+  }
+
+  function lookupHtml(item) {
+    var html = '';
+    var lens = lensUrl(item);
+    if (lens) html += lookBtnHtml(lens, '画像で検索');
+    else {
+      var img = imageSearchUrl(item);
+      if (img) html += lookBtnHtml(img, '名前で画像検索');
+    }
+    var merc = mercariUrl(item);
+    if (merc) {
+      html += '<a class="lookBtn" href="' + esc(merc) + '" target="_blank" rel="noopener noreferrer">' +
+        '<span class="lookBtn__i">\uD83D\uDCC8</span>メルカリ相場</a>';
+    }
+    return html ? '<div class="card__lookup">' + html + '</div>' : '';
+  }
+
   function card(item) {
     var el = document.createElement('article');
     el.className = 'card';
@@ -588,6 +645,7 @@
           '<p class="card__time">取得 ' + esc(ago(item.fetchedAt)) + '</p>' +
         '</div>' +
       '</a>' +
+      lookupHtml(item) +
       '<div class="card__actions">' +
         '<button class="actBtn' + (favorites[item.uid] ? ' is-on' : '') + '" data-act="fav" type="button"><span class="actBtn__i">☆</span><span class="actBtn__t">お気に入り</span></button>' +
         '<button class="actBtn' + (candidates[item.uid] ? ' is-on' : '') + '" data-act="cand" type="button"><span class="actBtn__i">◎</span><span class="actBtn__t">仕入れ候補</span></button>' +
@@ -961,6 +1019,8 @@
     setTimeout(function () { toast(label + 'を' + n + '件 取り込みました'); }, ready ? 200 : 800);
   }
 
+  var autoTimer = null;
+
   function setupImport() {
     // ブックマークレットからの受け取り（URLの #import=...）
     var first = handleHashImport();
@@ -993,6 +1053,8 @@
       if (changed) syncPushSoon();
       if (changed && state.server) refreshImported();
       else if (state.server) renderCollect();
+      clearTimeout(autoTimer);
+      autoTimer = setTimeout(maybeAutoCollect, 1500);
     });
     try { window.postMessage({ source: 'shiire-page', type: 'request' }, location.origin); } catch (e) {}
   }
@@ -1040,6 +1102,13 @@
         });
       });
     });
+    // 今見ているブランドを先に取り込む（画面がすぐ埋まるように）
+    if (!brandId && state.brandId) {
+      var cur = state.brandId;
+      out.sort(function (a, b) {
+        return (b.brandId === cur ? 1 : 0) - (a.brandId === cur ? 1 : 0);
+      });
+    }
     return out;
   }
 
@@ -1051,13 +1120,38 @@
     } catch (e) {}
   }
 
+  /* --- 自動取り込み（拡張機能が入っている端末だけ） --- */
+  // 画面を開いたときに、古くなっているものだけを裏で取り込みます。
+  // 開くのは検索結果ページだけで、1ページずつ・間隔をあけて開きます。
+  var AUTO_GAP_MS = 30 * 60 * 1000; // 前回の自動取り込みからこれだけ空ける
+
+  function autoConf() { return load(K.auto, {}) || {}; }
+  function autoOn() { return autoConf().on !== false; } // 初期値はオン
+  function setAutoOn(on) {
+    var v = autoConf(); v.on = !!on; save(K.auto, v);
+  }
+  function markAutoRun() {
+    var v = autoConf(); v.at = Date.now(); save(K.auto, v);
+  }
+
+  function maybeAutoCollect() {
+    if (!state.server) return;            // 設定がまだ
+    if (!state.extCaps.open) return;      // 拡張機能のない端末では何もしない
+    if (!autoOn()) return;
+    if (state.collect.running) return;
+    if (Date.now() - (Number(autoConf().at) || 0) < AUTO_GAP_MS) return;
+    if (!collectTargets(false).length) return;
+    markAutoRun();
+    startCollect(false, null, true);
+  }
+
   /* --- 拡張機能に頼んで1ページずつ自動で取り込む --- */
-  function startCollect(all, brandId) {
+  function startCollect(all, brandId, quiet) {
     var c = state.collect;
     if (c.running) return;
     var queue = collectTargets(all, brandId);
-    if (!queue.length) { toast('取り込み済みです'); return; }
-    c.running = true; c.queue = queue; c.idx = 0; c.got = 0;
+    if (!queue.length) { if (!quiet) toast('取り込み済みです'); return; }
+    c.running = true; c.queue = queue; c.idx = 0; c.got = 0; c.quiet = !!quiet;
     c.currentId = null; c.timer = null; c.gapTimer = null;
     renderCollect();
     runCollectStep();
@@ -1109,7 +1203,9 @@
     clearTimeout(c.timer); clearTimeout(c.gapTimer);
     refreshImported();
     syncPushSoon();
-    toast(pages + 'ページから ' + got + '件 取り込みました');
+    if (c.quiet) { if (got) toast('新しい入荷を ' + got + '件 取り込みました'); }
+    else toast(pages + 'ページから ' + got + '件 取り込みました');
+    c.quiet = false;
   }
 
   /* --- 表示 --- */
@@ -1150,7 +1246,8 @@
       stop.type = 'button';
       stop.id = 'collectBtn';
       stop.className = 'collect__btn is-running';
-      stop.innerHTML = '<span class="collect__spin"></span>取り込み中 ' + (c.idx + 1) + '/' + c.queue.length + '（押すと中止）';
+      stop.innerHTML = '<span class="collect__spin"></span>' + (c.quiet ? '自動取り込み中 ' : '取り込み中 ') +
+        (c.idx + 1) + '/' + c.queue.length + '（押すと中止）';
       stop.addEventListener('click', stopCollect);
       bar.appendChild(stop);
       box.appendChild(bar);
@@ -1186,7 +1283,7 @@
       }
       if (!auto && c.open === scope) b.classList.add('is-open');
       b.addEventListener('click', function () {
-        if (auto) { startCollect(todo === 0, isBrand ? brand.id : null); return; }
+        if (auto) { startCollect(todo === 0, isBrand ? brand.id : null, false); return; }
         c.open = (c.open === scope) ? null : scope;
         renderCollect();
       });
@@ -1240,9 +1337,13 @@
       note.innerHTML = 'この2サイト（' + esc(names) + '）はページを開いたときだけ読み取れます。' +
         '見たいブランドだけ押せば2ページで済みます。<a href="/import.html">設定のしかた →</a>';
     } else if (todoAll) {
-      note.textContent = '押すと裏で1ページずつ開いて取り込みます（全ブランドで' + todoAll + 'ページ、少し時間がかかります）';
+      note.textContent = autoOn()
+        ? 'この画面を開くと自動で取り込みます（いまは' + todoAll + 'ページ分が古くなっています）。すぐ取り込みたいときは押してください。'
+        : '押すと裏で1ページずつ開いて取り込みます（全ブランドで' + todoAll + 'ページ、少し時間がかかります）';
     } else {
-      note.textContent = '取り込み済みです。新しい入荷を見たいときは押すと取り直します。';
+      note.textContent = autoOn()
+        ? '取り込み済みです。古くなると自動で取り直します。'
+        : '取り込み済みです。新しい入荷を見たいときは押すと取り直します。';
     }
     box.appendChild(note);
   }
@@ -1444,6 +1545,17 @@
     });
 
     $('#addBrandBtn').addEventListener('click', addBrand);
+
+    var autoBox = $('#autoCollectInput');
+    if (autoBox) {
+      autoBox.checked = autoOn();
+      autoBox.addEventListener('change', function () {
+        setAutoOn(autoBox.checked);
+        renderCollect();
+        if (autoBox.checked) maybeAutoCollect();
+        toast(autoBox.checked ? '自動で取り込みます' : '自動取り込みをやめました');
+      });
+    }
 
     $('#exportBtn').addEventListener('click', function () {
       $('#settingsIO').value = JSON.stringify({ brands: state.brands, settings: settings });
