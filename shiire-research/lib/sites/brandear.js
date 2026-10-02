@@ -10,7 +10,8 @@ export default {
   color: '#c9a227',
 
   searchPageUrl(keyword) {
-    return `${BASE}/search/list/?SearchFullText=${encodeURIComponent(keyword)}&ItemOrder=8`;
+    // ItemOrder=8 … 新着順 / StockStatus=1 … 販売中のみ（売り切れを除く）
+    return `${BASE}/search/list/?SearchFullText=${encodeURIComponent(keyword)}&ItemOrder=8&StockStatus=1`;
   },
 
   fetchUrl(keyword) {
