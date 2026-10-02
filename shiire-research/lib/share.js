@@ -139,6 +139,7 @@ function cleanItem(it) {
     size: str(it.size, 40),
     condition: str(it.condition, 40),
     price: Math.round(price),
+    isNew: !!it.isNew,
   };
 }
 
