@@ -336,10 +336,20 @@
     var arr = list.slice();
     if (state.sort === 'priceAsc') arr.sort(function (a, b) { return a.price - b.price; });
     else if (state.sort === 'priceDesc') arr.sort(function (a, b) { return b.price - a.price; });
-    else arr.sort(function (a, b) {
-      var ra = a.rank == null ? 999 : a.rank, rb = b.rank == null ? 999 : b.rank;
-      return ra - rb || String(a.siteId).localeCompare(String(b.siteId));
-    });
+    else {
+      // 新着順。出品日そのものは各サイトの一覧に載っていないので、
+      // 「サイトが新着と出している印」→「そのサイトの一覧での並び順」で見る。
+      // 新着の印を出さないサイトを不利にしないよう、印を出しているサイトだけ後ろに回す。
+      var hasMark = {};
+      arr.forEach(function (it) { if (it.isNew) hasMark[it.siteId] = true; });
+      var group = function (it) { return (hasMark[it.siteId] && !it.isNew) ? 1 : 0; };
+      arr.sort(function (a, b) {
+        var ga = group(a), gb = group(b);
+        if (ga !== gb) return ga - gb;
+        var ra = a.rank == null ? 999 : a.rank, rb = b.rank == null ? 999 : b.rank;
+        return ra - rb || String(a.siteId).localeCompare(String(b.siteId));
+      });
+    }
     return arr;
   }
 
@@ -906,7 +916,7 @@
           items.push({
             uid: uid, id: it.id, url: it.url, image: it.image || null,
             brand: it.brand || '', name: it.name || '', size: it.size || '',
-            condition: it.condition || '', price: it.price,
+            condition: it.condition || '', price: it.price, isNew: !!it.isNew,
             siteId: siteId, siteName: meta.name, siteShort: meta.short, siteColor: meta.color,
             rank: items.length, inStock: true, fetchedAt: e.at, imported: true
           });
@@ -965,7 +975,10 @@
       keyword: data.k,
       at: data.t,
       items: data.i.map(function (a) {
-        return { id: a[0], url: a[1], image: a[2], brand: a[3], name: a[4], size: a[5], condition: a[6], price: a[7] };
+        return {
+          id: a[0], url: a[1], image: a[2], brand: a[3], name: a[4],
+          size: a[5], condition: a[6], price: a[7], isNew: !!a[8]
+        };
       }).filter(function (x) { return x.url && x.price; })
     };
   }
