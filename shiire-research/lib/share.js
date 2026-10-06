@@ -10,7 +10,7 @@
 
 import { gzipSync, gunzipSync } from 'node:zlib';
 
-const MAX_KEYWORDS = 8;      // 1サイトあたりの検索ワード数
+const MAX_KEYWORDS = 20;     // 1サイトあたりの検索ワード数（登録ブランド＋自分で見たぶん）
 const MAX_ITEMS = 200;       // 1検索ワードあたりの商品数
 const EXPIRE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_BYTES = 900 * 1024; // 保存前のJSONの上限
