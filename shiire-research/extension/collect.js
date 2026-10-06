@@ -2,7 +2,7 @@
    保存するのは商品情報だけです（Cookie・ログイン情報は扱いません）。 */
 (function () {
   'use strict';
-  var MAX_KEYWORDS = 8;
+  var MAX_KEYWORDS = 20;  // 1サイトあたりの検索ワード数
   var MAX_ITEMS = 200;
   var EXPIRE_MS = 7 * 24 * 60 * 60 * 1000;
 

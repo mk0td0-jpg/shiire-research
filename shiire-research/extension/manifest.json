@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "仕入れリサーチ 取り込み",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "セカンドストリート・ブランディアで開いた検索結果の商品を、仕入れリサーチの一覧に取り込みます。",
   "permissions": ["storage", "tabs"],
   "background": { "service_worker": "background.js" },
