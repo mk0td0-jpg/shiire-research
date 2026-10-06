@@ -823,6 +823,7 @@
   // セカスト・ブランディアはサーバーから取得できないため、
   // 拡張機能やブックマークレットが読み取った商品をここで受け取る。
   var IMPORT_EXPIRE_MS = 7 * 24 * 60 * 60 * 1000;
+  var MAX_KEYWORDS = 20;   // 1サイトあたりに覚えておく検索ワード数
 
   function normKey(s) {
     return String(s == null ? '' : s).toUpperCase().replace(/[\s・･‐\-'’.,()（）]/g, '');
@@ -946,7 +947,7 @@
         if (!site[k] || now - new Date(site[k].at).getTime() > IMPORT_EXPIRE_MS) delete site[k];
       });
       var keys = Object.keys(site).sort(function (a, b) { return new Date(site[b].at) - new Date(site[a].at); });
-      keys.slice(8).forEach(function (k) { delete site[k]; });
+      keys.slice(MAX_KEYWORDS).forEach(function (k) { delete site[k]; });
     });
     save(K.imported, imported);
   }
